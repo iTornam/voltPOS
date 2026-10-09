@@ -13,7 +13,12 @@ const { autoUpdater } = require('electron-updater');
 
 // ── Paths ────────────────────────────────────────────
 const IS_DEV = process.argv.includes('--dev');
-const APP_DIR = path.join(process.resourcesPath || __dirname, 'app');
+// Where the UI files live:
+//  - installed build: electron-builder copies src/ to <resources>/app  (see extraResources in package.json)
+//  - `npm start` / `npm run dev`: serve the src/ folder straight from the project
+const APP_DIR = app.isPackaged
+  ? path.join(process.resourcesPath, 'app')
+  : path.join(__dirname, 'src');
 const DATA_DIR = path.join(app.getPath('userData'), 'data');
 const PORT = 8765; // Internal port — not exposed to browser
 
@@ -63,7 +68,7 @@ function startServer() {
 
     // API: status check
     if (pathname === '/api/status') {
-      sendJSON(res, { ok: true, version: app.getVersion(), dataDir: DATA_DIR });
+      sendJSON(res, { ok: true, version: app.getVersion(), dataDir: DATA_DIR, appDir: APP_DIR, packaged: app.isPackaged, features: ['auth', 'recovery', 'tour', 'local-fonts'] });
       return;
     }
 
@@ -101,7 +106,7 @@ function startServer() {
     let filePath = path.join(APP_DIR, pathname === '/' ? 'index.html' : pathname);
 
     // Security: prevent directory traversal
-    if (!filePath.startsWith(APP_DIR)) {
+    if (filePath !== APP_DIR && !filePath.startsWith(APP_DIR + path.sep)) {
       res.writeHead(403);
       res.end('Forbidden');
       return;
@@ -139,6 +144,11 @@ function startServer() {
     });
   });
 
+  if (!fs.existsSync(path.join(APP_DIR, 'index.html'))) {
+    console.error(`VoltPOS: cannot find index.html in ${APP_DIR}`);
+    dialog.showErrorBox('VoltPOS cannot start', `The app files were not found:\n${APP_DIR}\n\nIf you are running from source, make sure src/index.html exists.`);
+  }
+
   server.listen(PORT, 'localhost', () => {
     console.log(`VoltPOS server running at http://localhost:${PORT}`);
     console.log(`Data directory: ${DATA_DIR}`);
@@ -146,6 +156,15 @@ function startServer() {
 
   server.on('error', (err) => {
     console.error('Server error:', err);
+    if (err.code === 'EADDRINUSE') {
+      // Another VoltPOS (often an old one still running in the background on macOS) already owns the port.
+      // Without this, this window would silently load the OTHER copy's pages and look like nothing updated.
+      dialog.showErrorBox(
+        'VoltPOS is already running',
+        `Another copy of VoltPOS (or another program) is using port ${PORT}.\n\nQuit VoltPOS completely (right-click its Dock icon -> Quit, or Cmd+Q) and open it again.`
+      );
+      app.exit(1);
+    }
   });
 }
 

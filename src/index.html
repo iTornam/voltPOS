@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0e1117">
 <title>VoltPOS</title>
+<link rel="stylesheet" href="fonts/fonts.css">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#0e1117;--surface:#161b25;--surface2:#1e2535;--border:#2a3348;--accent:#f5c400;--text:#e8eaf0;--muted:#6b7a99;--danger:#e05252;--success:#3db87a;--radius:6px;--font:'IBM Plex Sans',system-ui,sans-serif;--mono:'IBM Plex Mono',monospace}
 body.light{--bg:#f0f2f5;--surface:#fff;--surface2:#f5f6f8;--border:#dde1e9;--accent:#c9a000;--text:#1a1f2e;--muted:#7a8499;--danger:#d94040;--success:#2e9e65}
@@ -135,6 +135,16 @@ tr:hover td{background:var(--surface)}
 #pin-screen{display:none;position:fixed;inset:0;background:var(--bg);z-index:500;flex-direction:column;align-items:center;justify-content:center;gap:16px}
 .pin-key{height:60px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:20px;font-weight:600;cursor:pointer;font-family:var(--font)}
 .pin-key:hover{background:var(--surface2)}.pin-key:active{background:var(--border)}
+/* Guided tour */
+#tour-layer{display:none;position:fixed;inset:0;z-index:700}
+#tour-layer.on{display:block}
+#tour-layer.nohole{background:rgba(0,0,0,.72)}
+#tour-hole{display:none;position:fixed;border-radius:8px;box-shadow:0 0 0 9999px rgba(0,0,0,.72);outline:2px solid var(--accent);pointer-events:none;transition:top .22s,left .22s,width .22s,height .22s}
+#tour-card{position:fixed;width:330px;max-width:calc(100vw - 24px);background:var(--surface);border:1px solid var(--accent);border-radius:12px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.55);display:flex;flex-direction:column;gap:10px}
+#tour-offer{display:none;position:fixed;left:20px;bottom:20px;z-index:650;width:300px;max-width:calc(100vw - 40px);background:var(--surface);border:1px solid var(--accent);border-radius:12px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.5);flex-direction:column;gap:10px}
+#tour-offer.on{display:flex}
+/* Hide the whole app until first-time setup is finished */
+body.gated>*:not(#wizard-screen):not(#toast):not(script){display:none!important}
 /* Wizard */
 #wizard-screen{display:none;position:fixed;inset:0;background:var(--bg);z-index:400;flex-direction:column;align-items:center;justify-content:center;padding:20px}
 .wizard-box{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:32px;width:500px;max-width:100%;display:flex;flex-direction:column;gap:20px}
@@ -166,6 +176,7 @@ tr:hover td{background:var(--surface)}
     <span class="offline-badge">● OFFLINE</span>
     <span id="role-badge" class="role-badge"></span>
     <div class="header-date" id="clock"></div>
+    <button class="hdr-btn" id="tour-btn" onclick="startTour('page')" title="Guided tour of this page">❓ Tour</button>
     <button class="hdr-btn" onclick="toggleTheme()" id="theme-toggle">🌙</button>
     <button class="hdr-btn" id="header-install-btn" onclick="showInstallModal()" style="display:none;background:var(--accent);color:#000;border-color:var(--accent);">⊕ Install</button>
     <button class="hdr-btn" id="lock-btn" onclick="lockApp()" style="display:none;">🔒 Lock</button>
@@ -426,6 +437,7 @@ tr:hover td{background:var(--surface)}
       <div style="display:flex;gap:8px;">
         <button class="btn btn-primary" onclick="savePINs()">Save PINs</button>
         <button class="btn btn-secondary" onclick="clearAllPINs()">Remove All PINs</button>
+        <button class="btn btn-secondary" onclick="regenerateRecovery()">New Recovery Code</button>
       </div>
       <div id="pin-status" style="font-size:12px;color:var(--success);min-height:16px;"></div>
     </div>
@@ -436,12 +448,13 @@ tr:hover td{background:var(--surface)}
         <button class="btn btn-secondary" onclick="backupData()">📦 Backup</button>
         <button class="btn btn-secondary" onclick="document.getElementById('restore-file').click()">📂 Restore</button>
         <input type="file" id="restore-file" accept=".json" style="display:none" onchange="restoreData(event)">
+        <button class="btn btn-secondary" id="open-data-btn" style="display:none" onclick="voltposNative.openDataDir()">📁 Open Data Folder</button>
         <button class="btn btn-danger" onclick="clearAllData()">🗑 Clear All Data</button>
       </div>
       <div style="font-size:11px;color:var(--muted);">Data saved in <strong style="color:var(--text)">voltpos/data/</strong> folder. Back up regularly.</div>
     </div>
 
-    <div class="settings-section">
+    <div class="settings-section" id="sec-install">
       <h3>Install as Desktop App</h3>
       <p>Open in Chrome → look for <strong style="color:var(--text)">⊕</strong> in the address bar → Install. Works fully offline from Start Menu / Dock.</p>
     </div>
@@ -455,6 +468,14 @@ tr:hover td{background:var(--surface)}
   <div style="font-size:14px;color:var(--muted);" id="pin-shop-label"></div>
   <div style="font-size:22px;font-weight:600;margin-bottom:4px;" id="pin-main-title">Select your role</div>
   <div id="pin-role-select" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-bottom:8px;"></div>
+  <button id="pin-forgot" onclick="showRecoverPanel()" style="display:none;margin-top:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--accent);font-size:13px;font-weight:500;cursor:pointer;padding:9px 16px;font-family:var(--font);">🔑 Forgot Owner PIN?</button>
+  <div id="pin-recover" style="display:none;flex-direction:column;gap:10px;width:300px;max-width:90vw;">
+    <div style="font-size:12px;color:var(--muted);line-height:1.5;">Enter the recovery code you saved when you set the Owner PIN (also in <strong>RECOVERY.txt</strong> in the data folder).</div>
+    <input class="form-input" id="rc-code" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" style="font-family:var(--mono);text-transform:uppercase;">
+    <input class="form-input" type="password" id="rc-pin" maxlength="4" inputmode="numeric" placeholder="New Owner PIN (4 digits)">
+    <input class="form-input" type="password" id="rc-pin2" maxlength="4" inputmode="numeric" placeholder="Confirm new PIN">
+    <div style="display:flex;gap:8px;"><button class="btn btn-secondary" style="flex:1" onclick="cancelRecover()">Cancel</button><button class="btn btn-primary" style="flex:1" onclick="submitRecover()">Reset PIN</button></div>
+  </div>
   <div id="pin-role-prompt" style="font-size:14px;font-weight:500;margin-bottom:8px;display:none;"></div>
   <div id="pin-dots" style="display:flex;gap:10px;min-height:20px;margin-bottom:4px;"></div>
   <div id="pin-error" style="font-size:12px;color:var(--danger);min-height:16px;margin-bottom:8px;"></div>
@@ -510,18 +531,61 @@ tr:hover td{background:var(--surface)}
       <div style="font-size:15px;font-weight:600;">Step 3 — You're all set! 🎉</div>
       <div style="font-size:13px;color:var(--muted);line-height:1.8;">
         ✅ Shop details saved<br>
-        ✅ PIN configured<br><br>
+        <span id="wz-pin-line">✅ PIN configured</span><br><br>
         <strong style="color:var(--text);">Next steps:</strong><br>
         1. Go to <strong style="color:var(--accent)">Inventory</strong> and add your products<br>
         2. Then come back to <strong style="color:var(--accent)">Point of Sale</strong> to start selling<br>
         3. Check <strong style="color:var(--accent)">Settings</strong> anytime to add Cashier/Manager PINs
+      </div>
+      <div id="wz-recovery-box" style="display:none;background:var(--surface2);border:1px solid var(--accent);border-radius:8px;padding:14px;">
+        <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:6px;">YOUR OWNER PIN RECOVERY CODE</div>
+        <div id="wz-recovery-code" style="font-family:var(--mono);font-size:20px;font-weight:600;letter-spacing:.06em;user-select:text;margin-bottom:8px;"></div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.6;">If you forget the Owner PIN, this code is the only way back in. Write it down or take a photo and keep it private. A copy was also saved as <strong style="color:var(--text)">RECOVERY.txt</strong> in your data folder (File → Open Data Folder) — move it somewhere safe, then delete it.</div>
+        <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:13px;cursor:pointer;"><input type="checkbox" id="wz-saved-code"> I have saved my recovery code</label>
       </div>
       <button class="btn btn-primary" style="align-self:flex-end;padding:11px 24px;" onclick="wizardDone()">Start Using VoltPOS →</button>
     </div>
   </div>
 </div>
 
+<!-- GUIDED TOUR -->
+<div id="tour-offer">
+  <div style="font-size:15px;font-weight:600;color:var(--accent);">👋 New here?</div>
+  <div style="font-size:13px;color:var(--muted);line-height:1.6;">Take a 1-minute guided tour. It points out what each page does and the buttons you'll use most.</div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;">
+    <button class="btn btn-secondary" onclick="dismissTourOffer(false)">Not now</button>
+    <button class="btn btn-primary" onclick="dismissTourOffer(true)">Show me around</button>
+  </div>
+  <div style="font-size:11px;color:var(--muted);">You can start it any time with the ❓ Tour button at the top.</div>
+</div>
+<div id="tour-layer">
+  <div id="tour-hole"></div>
+  <div id="tour-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <div id="tour-label" style="font-size:11px;color:var(--muted);font-family:var(--mono);"></div>
+      <button class="act-btn" style="margin:0" onclick="endTour()">Skip tour ✕</button>
+    </div>
+    <div id="tour-title" style="font-size:15px;font-weight:600;color:var(--accent);"></div>
+    <div id="tour-text" style="font-size:13px;line-height:1.65;"></div>
+    <div style="height:3px;background:var(--border);border-radius:2px;"><div id="tour-bar" style="height:3px;background:var(--accent);border-radius:2px;width:0;transition:width .2s;"></div></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+      <button class="btn btn-secondary" id="tour-back" onclick="tourStep(-1)">← Back</button>
+      <button class="btn btn-secondary" id="tour-nextpage" onclick="tourNextPage()" style="display:none">Next page ▸</button>
+      <button class="btn btn-primary" id="tour-next" onclick="tourStep(1)">Next →</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODALS -->
+<!-- Recovery code (shown once) -->
+<div class="modal-bg" id="modal-recovery" style="z-index:600">
+  <div class="modal">
+    <h3>🔑 Save your recovery code</h3>
+    <div id="recovery-code-display" style="font-family:var(--mono);font-size:22px;font-weight:600;letter-spacing:.06em;text-align:center;padding:14px;background:var(--surface2);border:1px solid var(--accent);border-radius:8px;user-select:text;"></div>
+    <div style="font-size:13px;color:var(--muted);line-height:1.6;">This is the only way to reset a forgotten Owner PIN. Write it down or keep it somewhere private. It is also saved as <strong style="color:var(--text)">RECOVERY.txt</strong> in your data folder (File → Open Data Folder) — move it somewhere safe, then delete it. Each code works once; a new one is issued after it's used.</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;"><button class="btn btn-secondary" onclick="copyRecoveryCode()">Copy</button><button class="btn btn-primary" onclick="closeModal('modal-recovery')">I've saved it</button></div>
+  </div>
+</div>
 <!-- Product -->
 <div class="modal-bg" id="modal-product">
   <div class="modal">
@@ -762,6 +826,7 @@ async function load(key){
   try{return JSON.parse(localStorage.getItem(LS[key]));}catch{return null;}
 }
 async function save(key,value){
+  if(key==='settings'){value=Object.assign({},value);delete value._auth;} // security data lives only on the server
   try{localStorage.setItem(LS[key],JSON.stringify(value));}catch{}
   try{await fetch('/api/save/'+key,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});}catch(e){}
 }
@@ -772,7 +837,18 @@ async function save(key,value){
 let products=[],sales=[],customers=[],expenses=[],stocklog=[];
 let settings={shopName:'My Shop',tagline:'',currency:'GH₵',footer:'Thank you for your business!',tax:0,invoiceStart:1};
 let currentRole=null;
+let authToken=null;   // server session token for the logged-in role
+async function authAPI(action,body){
+  try{
+    const r=await fetch('/api/auth/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+    return await r.json();
+  }catch(e){return{ok:false,error:'Could not reach the VoltPOS server.'};}
+}
+function applyAuth(a){if(a)settings._auth=a;}
 let markPaidSaleId=null;
+
+// Escape user-typed text before putting it into HTML (names can contain < > & " ')
+function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 
 // ═══════════════════════════════════════
 // FORMAT
@@ -805,12 +881,14 @@ const ROLES={
   manager:{label:'Manager',color:'#f5c400',tabs:['dashboard','pos','inventory','customers','sales','credits']},
   owner:{label:'Owner',color:'#e05252',tabs:['dashboard','pos','inventory','customers','sales','credits','expenses','profit','settings']},
 };
-const PIN_KEYS={cashier:'vp_pin_cashier',manager:'vp_pin_manager',owner:'vp_pin_owner'};
-function getPIN(r){return localStorage.getItem(PIN_KEYS[r])||'';}
-function anyPINSet(){return Object.keys(ROLES).some(r=>getPIN(r));}
+// PINs live in data/settings.json (hashed, server-side). The browser only knows which roles have one.
+const LEGACY_PIN_KEYS={cashier:'vp_pin_cashier',manager:'vp_pin_manager',owner:'vp_pin_owner'};
+function hasPIN(r){return !!(settings._auth&&settings._auth.pins&&settings._auth.pins[r]);}
+function anyPINSet(){return Object.keys(ROLES).some(hasPIN);}
 
 function applyRole(role){
   currentRole=role;
+  setTimeout(maybeOfferTour,1000);
   const allowedTabs=role?ROLES[role].tabs:Object.values(ROLES).flatMap(r=>r.tabs);
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('hidden',!!role&&!allowedTabs.includes(t.dataset.tab)));
   const badge=document.getElementById('role-badge');
@@ -826,10 +904,13 @@ function applyRole(role){
 }
 
 function lockApp(){showPINScreen();}
+function endSession(){if(authToken){authAPI('logout',{token:authToken});authToken=null;}}
 
 // ─── PIN SCREEN ───
 let pinEntry='',pinTargetRole=null;
 function showPINScreen(){
+  endSession();
+  hideRecoverPanel();
   document.getElementById('pin-shop-label').textContent=settings.shopName||'VoltPOS';
   document.getElementById('pin-screen').style.display='flex';
   document.getElementById('pin-keypad').style.display='none';
@@ -841,17 +922,19 @@ function showPINScreen(){
   const rs=document.getElementById('pin-role-select');
   rs.innerHTML='';rs.style.display='flex';
   Object.keys(ROLES).forEach(role=>{
-    if(!getPIN(role))return;
+    if(!hasPIN(role))return;
     const btn=document.createElement('button');
     btn.style.cssText=`padding:12px 20px;border-radius:8px;border:1px solid ${ROLES[role].color}44;background:${ROLES[role].color}11;color:${ROLES[role].color};font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font);`;
     btn.textContent=ROLES[role].label;
     btn.onclick=()=>selectPINRole(role);
     rs.appendChild(btn);
   });
+  document.getElementById('pin-forgot').style.display=hasPIN('owner')?'block':'none';
 }
 function selectPINRole(role){
   pinTargetRole=role;pinEntry='';
   document.getElementById('pin-role-select').style.display='none';
+  document.getElementById('pin-forgot').style.display='none';
   document.getElementById('pin-role-prompt').style.display='block';
   document.getElementById('pin-role-prompt').textContent='Enter '+ROLES[role].label+' PIN';
   document.getElementById('pin-keypad').style.display='grid';
@@ -861,6 +944,7 @@ function selectPINRole(role){
 function pinCancel(){
   pinTargetRole=null;pinEntry='';
   document.getElementById('pin-role-select').style.display='flex';
+  document.getElementById('pin-forgot').style.display=hasPIN('owner')?'block':'none';
   document.getElementById('pin-keypad').style.display='none';
   document.getElementById('pin-role-prompt').style.display='none';
   document.getElementById('pin-main-title').textContent='Select your role';
@@ -874,14 +958,17 @@ function pinPress(k){
   if(!pinTargetRole||pinEntry.length>=4)return;
   pinEntry+=k;renderPINDots();
   if(pinEntry.length===4){
-    setTimeout(()=>{
-      if(pinEntry===getPIN(pinTargetRole)){
-        applyRole(pinTargetRole);
+    const role=pinTargetRole,attempt=pinEntry;
+    setTimeout(async()=>{
+      const r=await authAPI('verify',{role,pin:attempt});
+      if(r.ok){
+        authToken=r.token;
+        applyRole(role);
         document.getElementById('pin-screen').style.display='none';
         document.getElementById('pin-error').textContent='';
         renderDashboard();
       } else {
-        document.getElementById('pin-error').textContent='Incorrect PIN. Try again.';
+        document.getElementById('pin-error').textContent=r.error||'Incorrect PIN. Try again.';
         pinEntry='';renderPINDots();
       }
     },150);
@@ -894,29 +981,93 @@ function loadPINSettingsUI(){
   document.getElementById('pin-settings-rows').innerHTML=Object.keys(ROLES).map(role=>`
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <span style="font-size:13px;width:80px;color:${ROLES[role].color};font-weight:600;">${ROLES[role].label}</span>
-      <input class="form-input" type="password" id="pin-${role}" maxlength="4" placeholder="${getPIN(role)?'Change PIN':'Set PIN'}" inputmode="numeric" style="max-width:120px;">
+      <input class="form-input" type="password" id="pin-${role}" maxlength="4" placeholder="${hasPIN(role)?'Change PIN':'Set PIN'}" inputmode="numeric" style="max-width:120px;">
       <input class="form-input" type="password" id="pin-${role}-2" maxlength="4" placeholder="Confirm" inputmode="numeric" style="max-width:120px;">
-      ${getPIN(role)?`<span style="font-size:11px;color:var(--success);">● Set</span>`:`<span style="font-size:11px;color:var(--muted);">Not set</span>`}
+      ${hasPIN(role)?`<span style="font-size:11px;color:var(--success);">● Set</span>`:`<span style="font-size:11px;color:var(--muted);">Not set</span>`}
     </div>`).join('');
 }
-function savePINs(){
-  let changed=false;
-  for(const role of Object.keys(ROLES)){
+async function savePINs(){
+  // Owner first: the server refuses Cashier/Manager PINs until an Owner PIN exists.
+  const order=['owner','manager','cashier'];
+  const todo=[];
+  for(const role of order){
     const v1=document.getElementById('pin-'+role).value;
     const v2=document.getElementById('pin-'+role+'-2').value;
     if(!v1)continue;
     if(!/^\d{4}$/.test(v1)){toast(ROLES[role].label+' PIN must be 4 digits.');return;}
     if(v1!==v2){toast(ROLES[role].label+' PINs do not match.');return;}
-    localStorage.setItem(PIN_KEYS[role],v1);
-    changed=true;
+    todo.push([role,v1]);
   }
-  if(changed){document.getElementById('pin-status').textContent='✓ PINs saved.';toast('PINs saved.');loadPINSettingsUI();}
-  else toast('No new PINs entered.');
+  if(!todo.length){toast('No new PINs entered.');return;}
+  if(!hasPIN('owner')&&!todo.some(t=>t[0]==='owner')){toast('Set an Owner PIN first — it protects Settings and recovery.');return;}
+  let recoveryCode=null;
+  for(const [role,pin] of todo){
+    const r=await authAPI('set-pin',{role,pin,token:authToken});
+    if(!r.ok){toast(r.error||'Could not save PIN.');loadPINSettingsUI();return;}
+    applyAuth(r.auth);
+    if(r.token)authToken=r.token; // setting the Owner PIN logs this session in as owner
+    if(r.recoveryCode)recoveryCode=r.recoveryCode;
+  }
+  document.getElementById('pin-status').textContent='✓ PINs saved.';
+  toast('PINs saved.');loadPINSettingsUI();
+  if(recoveryCode)showRecoveryModal(recoveryCode);
 }
-function clearAllPINs(){
-  Object.values(PIN_KEYS).forEach(k=>localStorage.removeItem(k));
+async function clearAllPINs(){
+  if(!confirm('Remove ALL PINs? Anyone will be able to open every screen, and your recovery code will be deleted.'))return;
+  const r=await authAPI('clear-pins',{token:authToken});
+  if(!r.ok){toast(r.error||'Could not remove PINs.');return;}
+  applyAuth(r.auth);authToken=null;
   document.getElementById('pin-status').textContent='✓ All PINs removed.';
   toast('PIN lock disabled.');loadPINSettingsUI();
+}
+async function regenerateRecovery(){
+  if(!hasPIN('owner')){toast('Set an Owner PIN first.');return;}
+  if(!confirm('Generate a new recovery code? The old one stops working.'))return;
+  const r=await authAPI('regenerate-recovery',{token:authToken});
+  if(!r.ok){toast(r.error||'Could not generate a code.');return;}
+  showRecoveryModal(r.recoveryCode);
+}
+
+// ─── RECOVERY CODE UI ───
+function showRecoveryModal(code){
+  document.getElementById('recovery-code-display').textContent=code;
+  document.getElementById('modal-recovery').classList.add('open');
+}
+function copyRecoveryCode(){
+  const c=document.getElementById('recovery-code-display').textContent;
+  try{navigator.clipboard.writeText(c);toast('Recovery code copied.');}catch{toast('Select the code and copy it manually.');}
+}
+function showRecoverPanel(){
+  document.getElementById('pin-role-select').style.display='none';
+  document.getElementById('pin-forgot').style.display='none';
+  document.getElementById('pin-main-title').textContent='Reset Owner PIN';
+  document.getElementById('pin-recover').style.display='flex';
+  document.getElementById('pin-error').textContent='';
+  document.getElementById('rc-code').focus();
+}
+function hideRecoverPanel(){
+  const el=document.getElementById('pin-recover');if(!el)return;
+  el.style.display='none';
+  ['rc-code','rc-pin','rc-pin2'].forEach(id=>document.getElementById(id).value='');
+  if(document.getElementById('pin-main-title').textContent==='Reset Owner PIN')document.getElementById('pin-main-title').textContent='Select your role';
+}
+function cancelRecover(){hideRecoverPanel();showPINScreen();}
+async function submitRecover(){
+  const code=document.getElementById('rc-code').value.trim();
+  const p1=document.getElementById('rc-pin').value,p2=document.getElementById('rc-pin2').value;
+  const err=document.getElementById('pin-error');
+  if(!code){err.textContent='Enter your recovery code.';return;}
+  if(!/^\d{4}$/.test(p1)){err.textContent='New PIN must be exactly 4 digits.';return;}
+  if(p1!==p2){err.textContent='New PINs do not match.';return;}
+  const r=await authAPI('recover',{code,newPin:p1});
+  if(!r.ok){err.textContent=r.error||'Recovery failed.';return;}
+  applyAuth(r.auth);authToken=r.token;
+  hideRecoverPanel();
+  applyRole('owner');
+  document.getElementById('pin-screen').style.display='none';
+  renderDashboard();
+  toast('Owner PIN reset.');
+  showRecoveryModal(r.recoveryCode); // codes are single-use, so a fresh one is issued
 }
 
 // Auto-lock 15min
@@ -933,7 +1084,9 @@ document.addEventListener('keydown',resetInactivity);
 // ═══════════════════════════════════════
 let wizardCurrentStep=1;
 const WIZARD_STEPS=3;
+let wizardSkippedPIN=false;
 function showWizard(){
+  document.body.classList.add('gated');
   document.getElementById('wizard-screen').style.display='flex';
   wizardCurrentStep=1;
   updateWizardProgress();
@@ -965,15 +1118,39 @@ async function wizardNext(step,skip=false){
     if(!p1){toast('Enter an owner PIN or click Skip.');return;}
     if(!/^\d{4}$/.test(p1)){toast('PIN must be exactly 4 digits.');return;}
     if(p1!==p2){toast('PINs do not match.');return;}
-    localStorage.setItem(PIN_KEYS.owner,p1);
+    const r=await authAPI('set-pin',{role:'owner',pin:p1});
+    if(!r.ok){toast(r.error||'Could not save PIN.');return;}
+    applyAuth(r.auth);
+    if(r.token)authToken=r.token;
+    wizardSkippedPIN=false;
+    if(r.recoveryCode){
+      document.getElementById('wz-recovery-code').textContent=r.recoveryCode;
+      document.getElementById('wz-recovery-box').style.display='block';
+      document.getElementById('wz-pin-line').textContent='✅ Owner PIN configured';
+    }
     toast('Owner PIN set.');
+  }
+  if(step===2&&skip){
+    if(hasPIN('owner')){toast('An Owner PIN was already saved. Enter a PIN to continue — a fresh recovery code will be issued.');return;}
+    if(!confirm('Skip the Owner PIN?\n\nWithout it, anyone using this computer can open Settings, profit reports and delete all data. You can set one later in Settings.'))return;
+    wizardSkippedPIN=true;
+    document.getElementById('wz-pin-line').textContent='⚠️ No PIN set — anyone can open every screen';
+    document.getElementById('wz-recovery-box').style.display='none';
   }
   wizardCurrentStep=step+1;
   updateWizardProgress();
 }
-function wizardDone(){
+async function wizardDone(){
+  if(hasPIN('owner')&&document.getElementById('wz-recovery-box').style.display!=='none'&&!document.getElementById('wz-saved-code').checked){
+    toast('Please confirm you have saved your recovery code.');return;
+  }
+  // The server only accepts this if an Owner PIN exists or the owner explicitly skipped.
+  const r=await authAPI('complete-setup',{skipped:wizardSkippedPIN});
+  if(!r.ok){toast(r.error||'Setup could not be completed.');return;}
+  applyAuth(r.auth);
+  await loadAppData(); // data wasn't loaded while the setup lock was up
+  document.body.classList.remove('gated');
   document.getElementById('wizard-screen').style.display='none';
-  localStorage.setItem('vp_setup_done','1');
   if(anyPINSet()) showPINScreen();
   else applyRole(null);
   renderDashboard();
@@ -1001,6 +1178,209 @@ function switchTab(tab){
 document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>switchTab(t.dataset.tab)));
 
 // ═══════════════════════════════════════
+// GUIDED TOUR
+// ═══════════════════════════════════════
+const TOUR_ORDER=['dashboard','pos','inventory','customers','sales','credits','expenses','profit','settings'];
+const TOUR_NAMES={dashboard:'Dashboard',pos:'Point of Sale',inventory:'Inventory',customers:'Customers',sales:'Sales Records',credits:'Credit Sales',expenses:'Expenses',profit:'Profit & Reports',settings:'Settings'};
+// sel = CSS selector of the thing to highlight, up = climb N parents (to highlight a whole card/section)
+const TOUR={
+  dashboard:[
+    {sel:'#dash-revenue',up:2,title:'Today at a glance',text:'Revenue, profit (after cost of goods and expenses), cash vs MoMo/card takings, and money customers still owe you. This updates after every sale.'},
+    {sel:`#view-dashboard [onclick="switchTab('pos')"]`,title:'New Sale',text:'Jump straight to the till. Shortcut: <b>F2</b>.'},
+    {sel:'#view-dashboard [onclick="showEndOfDay()"]',title:'End of Day',text:'At closing time, tap this for today\'s totals: revenue, discounts, refunds, expenses, net profit and a payment breakdown. You can print it.'},
+    {sel:'#dash-low-stock',up:1,title:'Low stock warnings',text:'Products that are running out show up here, so you can restock before you lose sales.'},
+    {sel:'#dash-recent-sales',up:1,title:'Recent sales',text:'Your latest transactions. <b>View All</b> opens the full records.'},
+  ],
+  pos:[
+    {sel:'#product-search',title:'Find a product',text:'Type a name or scan/enter a barcode. Press <b>F2</b> from anywhere to jump here.'},
+    {sel:'#cat-filter',title:'Categories',text:'Filter the products by category to find items faster.'},
+    {sel:'#products-grid',title:'Tap to add to cart',text:'Tap a product to add it to the cart. Each card shows what\'s left in stock. Products with zero stock are hidden here.'},
+    {sel:'#cart-items',title:'The cart',text:'Items you\'ve added appear here. Use <b>−</b> and <b>+</b> to change quantity, <b>✕</b> to remove an item, or <b>Clear</b> to start over.'},
+    {sel:'#discount-input',title:'Discount',text:'Optional. Enter an amount to take off the total. It can\'t be more than the subtotal.'},
+    {sel:'#payment-method',title:'Payment method',text:'Cash, MoMo, Card or Cheque. Choose <b>Credit</b> when the customer will pay later. The sale then goes to Credit Sales until it\'s paid.'},
+    {sel:'#customer-name',title:'Customer name',text:'Optional for normal sales (it shows as Walk-in). For credit sales, type the name so you can track who owes you. Saved customers appear as suggestions.'},
+    {sel:'#checkout-btn',title:'Charge & print receipt',text:'Review the sale, confirm it, and the receipt appears ready to print. Stock reduces automatically. Shortcut: <b>F10</b>.'},
+  ],
+  inventory:[
+    {sel:'#inv-search',title:'Search your stock',text:'Find a product by name, category or barcode.'},
+    {sel:'#view-inventory [onclick="openAddProduct()"]',title:'Add a product',text:'Enter the selling price, <b>cost price</b>, stock quantity and a low-stock level. The cost price is what makes your profit figures accurate.'},
+    {sel:'#view-inventory .table-wrap',title:'Your stock list',text:'Each row has <b>Edit</b>, <b>Restock</b> (add new stock and log it), <b>History</b> (every stock change, ever) and <b>Delete</b>.'},
+    {sel:'#view-inventory [onclick="exportInventoryCSV()"]',title:'Export',text:'Download your stock list as a spreadsheet (CSV).'},
+  ],
+  customers:[
+    {sel:'#cust-search',title:'Find a customer',text:'Search by name or phone number.'},
+    {sel:'#view-customers [onclick="openAddCustomer()"]',title:'Add a customer',text:'Save customer details so you can pick them quickly at checkout and track their purchases and credit.'},
+    {sel:'#view-customers .table-wrap',title:'Customer list',text:'<b>History</b> shows everything a customer has bought. <b>Edit</b> changes their details.'},
+  ],
+  sales:[
+    {sel:'#view-sales .toolbar',title:'Filter sales',text:'Pick a date, or search by customer name or invoice number. <b>Clear</b> resets the filters.'},
+    {sel:'#stat-cards',title:'Totals',text:'Summary figures for the sales currently shown.'},
+    {sel:'#view-sales .table-wrap',title:'Every sale',text:'<b>View</b> opens the full sale and lets you reprint the receipt. <b>Amend</b> records a return, price correction, partial refund or exchange. The original sale is kept.'},
+    {sel:'#view-sales [onclick="exportSalesCSV()"]',title:'Export',text:'Download the filtered sales as a spreadsheet (CSV).'},
+  ],
+  credits:[
+    {sel:'#credit-filter',title:'Filter',text:'Switch between unpaid, paid, or all credit sales.'},
+    {sel:'#credit-stat-cards',title:'Who owes what',text:'Totals of outstanding and collected credit.'},
+    {sel:'#view-credits .table-wrap',title:'Collecting payment',text:'When a customer pays, tap <b>Mark Paid</b> and choose how they paid. The sale is then settled.'},
+  ],
+  expenses:[
+    {sel:'#view-expenses [onclick="openAddExpense()"]',title:'Log an expense',text:'Record rent, transport, utilities, salaries and more. Expenses are subtracted from profit on the dashboard and in reports.'},
+    {sel:'#exp-stat-cards',title:'Expense totals',text:'A summary of what you\'ve spent.'},
+    {sel:'#view-expenses .table-wrap',title:'Expense list',text:'Filter by date above. Delete an entry here if it was logged by mistake.'},
+  ],
+  profit:[
+    {sel:'#profit-from',up:1,title:'Choose a period',text:'Pick From/To dates, or use the quick buttons: <b>Today</b>, <b>This Week</b>, <b>This Month</b>, <b>All Time</b>.'},
+    {sel:'#profit-summary',title:'The numbers that matter',text:'Revenue, cost, expenses and net profit for the period you chose.'},
+    {sel:'.profit-tabs',title:'Two views',text:'<b>Sales Breakdown</b> shows profit on each sale. <b>Best Sellers</b> ranks products by units sold and profit made.'},
+    {sel:'#view-profit [onclick="exportProfitCSV()"]',title:'Export',text:'Download the report as a spreadsheet (CSV) for your accountant.'},
+  ],
+  settings:[
+    {sel:'#s-shopname',up:2,title:'Shop details',text:'Your shop name, address line, currency, VAT % and the footer message. These print on every receipt.'},
+    {sel:'#pin-settings-rows',up:1,title:'PIN lock & roles',text:'<b>Cashier</b>: till only. <b>Manager</b>: + inventory, customers, sales, credits. <b>Owner</b>: everything. Set the Owner PIN first. If it\'s ever forgotten, use <b>Forgot Owner PIN?</b> on the lock screen with your recovery code.'},
+    {sel:'#view-settings [onclick="regenerateRecovery()"]',title:'Recovery code',text:'Lost your recovery code? Make a new one here (the old one stops working). Keep it somewhere private. It\'s your only way back in if you forget the Owner PIN.'},
+    {sel:'#restore-file',up:2,title:'Backup & restore',text:'<b>Backup</b> saves all your data to one file. Do it regularly and keep a copy off this computer (a flash drive or email). <b>Restore</b> loads a backup. <b>Clear All Data</b> erases everything. Be careful.'},
+  ],
+};
+let tour=null;
+
+function tourTabs(){const allowed=currentRole?ROLES[currentRole].tabs:TOUR_ORDER;return TOUR_ORDER.filter(t=>allowed.includes(t));}
+function tourBlocked(){
+  const shown=id=>{const e=document.getElementById(id);return e&&getComputedStyle(e).display!=='none';};
+  return shown('pin-screen')||shown('wizard-screen')||!!document.querySelector('.modal-bg.open');
+}
+function tourTarget(s){
+  if(!s.sel)return null;
+  let el=document.querySelector(s.sel);
+  for(let i=0;el&&i<(s.up||0);i++)el=el.parentElement;
+  if(!el)return null;
+  const r=el.getBoundingClientRect();
+  return(r.width>0&&r.height>0)?el:null;
+}
+function tourPageSteps(tab){return TOUR[tab].map(s=>Object.assign({tab,page:TOUR_NAMES[tab]},s));}
+function tourIntroSteps(){
+  const lock=document.getElementById('lock-btn');
+  const roleTxt=currentRole?`You're signed in as <b>${ROLES[currentRole].label}</b>, so you only see the pages that role needs.`:'No PIN is set, so every page is open.';
+  const st=[
+    {title:'Welcome to VoltPOS ⚡',text:'A quick tour of what each page does and the buttons you\'ll use most. Use the <b>← →</b> keys or the buttons, and <b>Esc</b> to quit. Restart it any time with the <b>❓ Tour</b> button.',page:'Welcome'},
+    {sel:'.tabs',title:'Your pages',text:'Each tab is a page. '+roleTxt,page:'Welcome'},
+  ];
+  if(lock&&getComputedStyle(lock).display!=='none')st.push({sel:'#lock-btn',title:'Lock',text:'Hides everything behind your PIN. Tap it whenever you step away. VoltPOS also locks itself after 15 minutes of no activity.',page:'Welcome'});
+  st.push({sel:'.offline-badge',title:'100% offline',text:'Everything is stored on this computer. No internet is needed to sell, print or view reports.',page:'Welcome'});
+  return st;
+}
+
+function startTour(mode){
+  if(tour)return;
+  if(tourBlocked()){if(!document.querySelector('.modal-bg.open'))return;toast('Close the open window first, then start the tour.');return;}
+  document.getElementById('tour-offer').classList.remove('on');
+  const tabs=tourTabs();
+  const cur=(document.querySelector('.tab.active')||{dataset:{}}).dataset.tab;
+  const first=tabs.includes(cur)?cur:tabs[0];
+  tour={mode,i:0,steps:[],lastTab:null};
+  if(mode==='full'){
+    tour.steps=tourIntroSteps();
+    tabs.forEach(t=>tour.steps.push(...tourPageSteps(t)));
+    tour.lastTab=tabs[tabs.length-1];
+  } else {
+    tour.steps=tourPageSteps(first);
+  }
+  document.addEventListener('keydown',tourKey,true);
+  window.addEventListener('resize',tourReposition);
+  tourGo(0,1);
+}
+function tourGo(i,dir){
+  tour.i=i;
+  while(tour.i>=0&&tour.i<tour.steps.length){
+    const s=tour.steps[tour.i];
+    if(s.tab&&!document.getElementById('view-'+s.tab).classList.contains('active'))switchTab(s.tab);
+    if(!s.sel||tourTarget(s)){tourRender();return;}
+    tour.i+=dir; // target not on screen — skip it
+  }
+  if(tour.i<0)return tourGo(0,1);
+  endTour(true);
+}
+function tourStep(d){
+  if(!tour)return;
+  if(d>0&&tour.i>=tour.steps.length-1){endTour(true);return;}
+  tourGo(tour.i+d,d);
+}
+function tourNextPage(){
+  const tabs=tourTabs(),cur=tour.steps[tour.i].tab,nxt=tabs[tabs.indexOf(cur)+1];
+  if(!nxt)return;
+  const from=tour.steps.length;
+  tour.steps.push(...tourPageSteps(nxt));
+  tourGo(from,1);
+}
+function tourRender(){
+  const s=tour.steps[tour.i],total=tour.steps.length,last=tour.i===total-1;
+  document.getElementById('tour-label').textContent=(s.page||'')+' · '+(tour.i+1)+' of '+total;
+  document.getElementById('tour-title').textContent=s.title;
+  document.getElementById('tour-text').innerHTML=s.text;
+  document.getElementById('tour-bar').style.width=((tour.i+1)/total*100)+'%';
+  document.getElementById('tour-back').style.visibility=tour.i===0?'hidden':'visible';
+  document.getElementById('tour-next').textContent=last?'Finish ✓':'Next →';
+  const tabs=tourTabs(),nextTab=s.tab?tabs[tabs.indexOf(s.tab)+1]:null;
+  document.getElementById('tour-nextpage').style.display=(tour.mode==='page'&&last&&nextTab)?'inline-block':'none';
+  document.getElementById('tour-layer').classList.add('on');
+  const el=tourTarget(s);
+  if(el)el.scrollIntoView({block:'center',inline:'nearest'});
+  tourReposition();
+}
+function tourReposition(){
+  if(!tour)return;
+  const s=tour.steps[tour.i],el=tourTarget(s);
+  const layer=document.getElementById('tour-layer'),hole=document.getElementById('tour-hole'),card=document.getElementById('tour-card');
+  const vw=window.innerWidth,vh=window.innerHeight,cw=card.offsetWidth,ch=card.offsetHeight,gap=14,m=12;
+  const cx=x=>Math.min(Math.max(m,x),vw-cw-m),cy=y=>Math.min(Math.max(m,y),vh-ch-m);
+  let x,y;
+  if(!el){
+    hole.style.display='none';layer.classList.add('nohole');
+    x=cx((vw-cw)/2);y=cy((vh-ch)/2);
+  } else {
+    layer.classList.remove('nohole');
+    const r=el.getBoundingClientRect(),pad=6;
+    const t=r.top-pad,l=r.left-pad,w=r.width+pad*2,h=r.height+pad*2;
+    hole.style.display='block';
+    hole.style.top=t+'px';hole.style.left=l+'px';hole.style.width=w+'px';hole.style.height=h+'px';
+    if(t+h+gap+ch<=vh-m){x=cx(l+w/2-cw/2);y=t+h+gap;}                 // below
+    else if(t-gap-ch>=m){x=cx(l+w/2-cw/2);y=t-gap-ch;}                // above
+    else if(l+w+gap+cw<=vw-m){x=l+w+gap;y=cy(t+h/2-ch/2);}            // right
+    else if(l-gap-cw>=m){x=l-gap-cw;y=cy(t+h/2-ch/2);}                // left
+    else{x=cx(l+w/2-cw/2);y=vh-ch-m;}                                 // overlap bottom as a last resort
+  }
+  card.style.left=x+'px';card.style.top=y+'px';
+}
+function tourKey(e){
+  if(!tour)return;
+  if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();endTour();return;}
+  if(e.key==='ArrowRight'||e.key==='Enter'){e.preventDefault();e.stopImmediatePropagation();tourStep(1);return;}
+  if(e.key==='ArrowLeft'){e.preventDefault();e.stopImmediatePropagation();tourStep(-1);return;}
+  e.stopImmediatePropagation(); // swallow other shortcuts (F2, F10…) while the tour is open
+}
+function endTour(){
+  if(!tour)return;
+  document.removeEventListener('keydown',tourKey,true);
+  window.removeEventListener('resize',tourReposition);
+  document.getElementById('tour-layer').classList.remove('on','nohole');
+  document.getElementById('tour-hole').style.display='none';
+  try{localStorage.setItem('vp_tour_seen_'+(currentRole||'open'),'1');}catch{}
+  tour=null;
+}
+// Offered once per role on first sign-in (not forced; can always be started from the header)
+function maybeOfferTour(){
+  if(tour||tourBlocked())return;
+  try{if(localStorage.getItem('vp_tour_seen_'+(currentRole||'open')))return;}catch{}
+  document.getElementById('tour-offer').classList.add('on');
+  // Never leave it sitting over the till: it tucks itself away after 25s (the ❓ Tour button is always there).
+  setTimeout(()=>{if(document.getElementById('tour-offer').classList.contains('on'))dismissTourOffer(false);},25000);
+}
+function dismissTourOffer(start){
+  try{localStorage.setItem('vp_tour_seen_'+(currentRole||'open'),'1');}catch{}
+  document.getElementById('tour-offer').classList.remove('on');
+  if(start)startTour('full');
+}
+
+// ═══════════════════════════════════════
 // KEYBOARD SHORTCUTS
 // ═══════════════════════════════════════
 document.addEventListener('keydown',e=>{
@@ -1012,7 +1392,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='F10'){e.preventDefault();checkout();}
   if(e.key==='F5'){e.preventDefault();switchTab('dashboard');}
   if(e.key==='Escape'){
-    document.querySelectorAll('.modal-bg.open').forEach(m=>m.classList.remove('open'));
+    document.querySelectorAll('.modal-bg.open:not(#modal-recovery)').forEach(m=>m.classList.remove('open'));
     if(!inInput){clearCart();}
   }
   if(e.key==='Enter'&&!inInput){
@@ -1031,7 +1411,7 @@ function filteredProducts(){
 // ═══════════════════════════════════════
 // SETTINGS
 // ═══════════════════════════════════════
-async function loadSettingsFromServer(){const s=await load(KEY.settings);if(s)settings=Object.assign({invoiceStart:1},s);}
+async function loadSettingsFromServer(){const s=await load(KEY.settings);if(s)settings=Object.assign({},settings,s);}
 function loadSettingsUI(){
   document.getElementById('s-shopname').value=settings.shopName;
   document.getElementById('s-tagline').value=settings.tagline;
@@ -1058,7 +1438,8 @@ function uid(){return Math.random().toString(36).slice(2,9)+Date.now().toString(
 let activeCategory='All';
 function buildCatFilter(){
   const cats=['All',...new Set(products.map(p=>p.cat))].sort((a,b)=>a==='All'?-1:a.localeCompare(b));
-  document.getElementById('cat-filter').innerHTML=cats.map(c=>`<button class="cat-btn${c===activeCategory?' active':''}" onclick="setCategory('${c}')">${c}</button>`).join('');
+  const box=document.getElementById('cat-filter');box.innerHTML='';
+  cats.forEach(c=>{const btn=document.createElement('button');btn.className='cat-btn'+(c===activeCategory?' active':'');btn.textContent=c;btn.onclick=()=>setCategory(c);box.appendChild(btn);}); // DOM, not HTML: category text is never parsed as markup
 }
 function setCategory(c){activeCategory=c;buildCatFilter();renderProductGrid();}
 function renderProductGrid(){
@@ -1074,7 +1455,7 @@ function renderProductGrid(){
   if(!list.length){grid.innerHTML=`<div class="no-results">No products found.</div>`;return;}
   grid.innerHTML=list.map(p=>`
     <div class="product-card" onclick="addToCart('${p.id}')">
-      <div class="product-name">${p.name}</div>
+      <div class="product-name">${esc(p.name)}</div>
       <div class="product-price">${fmt(p.price)}</div>
       <div class="product-stock${p.stock<=p.low?' low':''}">${p.stock<=p.low?'! ':''}Stock: ${p.stock}</div>
     </div>`).join('');
@@ -1111,7 +1492,7 @@ function renderCart(){
   el.innerHTML=cart.map(item=>`
     <div class="cart-item">
       <div class="cart-item-top">
-        <div class="cart-item-name">${item.name}</div>
+        <div class="cart-item-name">${esc(item.name)}</div>
         <button class="cart-item-remove" onclick="removeFromCart('${item.id}')">✕</button>
       </div>
       <div class="cart-item-bottom">
@@ -1137,7 +1518,7 @@ function renderCartFooter(){
   document.getElementById('cart-total').textContent=fmt(cartTotal());
 }
 function updateCustomerSuggestions(){
-  document.getElementById('customer-suggestions').innerHTML=customers.map(c=>`<option value="${c.name}">`).join('');
+  document.getElementById('customer-suggestions').innerHTML=customers.map(c=>`<option value="${esc(c.name)}">`).join('');
 }
 
 // ═══════════════════════════════════════
@@ -1197,22 +1578,22 @@ function buildReceiptHTML(sale,printId='printable-receipt'){
   const discLine=sale.discount>0?`<div class="receipt-line"><span>Discount</span><span>-${fmt(sale.discount)}</span></div>`:'';
   const creditLine=sale.payment==='Credit'&&!sale.creditPaid?`<div class="receipt-line" style="color:#e05252;font-weight:bold;"><span>STATUS</span><span>CREDIT — UNPAID</span></div>`:'';
   return `<div class="receipt" id="${printId}">
-    <div class="receipt-title">${settings.shopName}</div>
-    <div class="receipt-sub">${settings.tagline}</div>
+    <div class="receipt-title">${esc(settings.shopName)}</div>
+    <div class="receipt-sub">${esc(settings.tagline)}</div>
     <hr class="receipt-divider">
     <div class="receipt-line"><span>${sale.id}</span><span>${d.toLocaleDateString('en-GH')}</span></div>
     <div class="receipt-line"><span>Time:</span><span>${d.toLocaleTimeString('en-GH',{hour:'2-digit',minute:'2-digit'})}</span></div>
-    <div class="receipt-line"><span>Customer:</span><span>${sale.customer}</span></div>
+    <div class="receipt-line"><span>Customer:</span><span>${esc(sale.customer)}</span></div>
     <div class="receipt-line"><span>Payment:</span><span>${sale.payment}</span></div>
     <hr class="receipt-divider">
-    ${sale.items.map(i=>`<div class="receipt-line"><span>${i.name}</span></div><div class="receipt-line" style="color:#555"><span>&nbsp;&nbsp;${i.qty} × ${fmt(i.price)}</span><span>${fmt(i.qty*i.price)}</span></div>`).join('')}
+    ${sale.items.map(i=>`<div class="receipt-line"><span>${esc(i.name)}</span></div><div class="receipt-line" style="color:#555"><span>&nbsp;&nbsp;${i.qty} × ${fmt(i.price)}</span><span>${fmt(i.qty*i.price)}</span></div>`).join('')}
     <hr class="receipt-divider">
     <div class="receipt-line"><span>Subtotal</span><span>${fmt(sale.subtotal)}</span></div>
     ${discLine}${taxLine}
     <div class="receipt-line receipt-total"><span>TOTAL</span><span>${fmt(sale.total)}</span></div>
     ${creditLine}
     <hr class="receipt-divider">
-    <div class="receipt-footer">${settings.footer}</div>
+    <div class="receipt-footer">${esc(settings.footer)}</div>
   </div>`;
 }
 function showReceipt(sale){
@@ -1226,11 +1607,27 @@ function printSaleDetail(){doPrint('printable-sale-detail');}
 function printEOD(){doPrint('printable-eod');}
 function doPrint(id){
   if(_printing)return;_printing=true;setTimeout(()=>_printing=false,2000);
-  const el=document.getElementById(id);if(!el)return;
-  const win=window.open('','_blank','width=400,height=700');
-  if(!win){toast('Allow popups for printing.');_printing=false;return;}
-  win.document.write(`<!DOCTYPE html><html><head><title>Print</title><style>body{font-family:monospace;margin:0;padding:16px;background:#fff;}.receipt{width:280px;margin:auto;font-size:12px;line-height:1.9;}.receipt-line{display:flex;justify-content:space-between;margin:2px 0;}.receipt-title{font-size:15px;font-weight:bold;text-align:center;}.receipt-sub{text-align:center;color:#666;font-size:10px;margin-bottom:8px;}.receipt-divider{border:none;border-top:1px dashed #bbb;margin:6px 0;}.receipt-total{font-weight:bold;font-size:13px;}.receipt-footer{text-align:center;color:#999;font-size:10px;margin-top:8px;}</style></head><body>${el.outerHTML}<script>window.onload=function(){window.print();window.close();}<\/script></body></html>`);
-  win.document.close();
+  const el=document.getElementById(id);if(!el){_printing=false;return;}
+  // Print from a hidden frame inside the app. (window.open pop-ups are blocked in the desktop app,
+  // which is why receipts used to show "Allow popups for printing".)
+  const old=document.getElementById('print-frame');if(old)old.remove();
+  const f=document.createElement('iframe');
+  f.id='print-frame';f.setAttribute('aria-hidden','true');
+  f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+  document.body.appendChild(f);
+  const css=':root{--text:#000;--muted:#666;--border:#bbb;--danger:#b00;--success:#070;--mono:monospace;--font:monospace}'
+    +'body{font-family:monospace;margin:0;padding:16px;background:#fff;color:#000}'
+    +'.receipt{width:280px;margin:auto;font-size:12px;line-height:1.9}.receipt-line{display:flex;justify-content:space-between;margin:2px 0}'
+    +'.receipt-title{font-size:15px;font-weight:bold;text-align:center}.receipt-sub{text-align:center;color:#666;font-size:10px;margin-bottom:8px}'
+    +'.receipt-divider{border:none;border-top:1px dashed #bbb;margin:6px 0}.receipt-total{font-weight:bold;font-size:13px}'
+    +'.receipt-footer{text-align:center;color:#999;font-size:10px;margin-top:8px}';
+  const d=f.contentWindow.document;
+  d.open();d.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>VoltPOS</title><style>'+css+'</style></head><body>'+el.outerHTML+'</body></html>');d.close();
+  setTimeout(()=>{
+    try{f.contentWindow.focus();f.contentWindow.print();}
+    catch(e){toast('Could not open the print dialog.');_printing=false;}
+    setTimeout(()=>{if(f.parentNode)f.remove();},60000);
+  },250);
 }
 
 // ═══════════════════════════════════════
@@ -1244,8 +1641,8 @@ function renderInventory(){
   const margin=p=>p.price&&p.cost?Math.round((p.price-p.cost)/p.price*100)+'%':'—';
   document.getElementById('inv-tbody').innerHTML=list.map(p=>`
     <tr>
-      <td>${p.name}${p.barcode?`<br><span style="font-size:10px;color:var(--muted);font-family:var(--mono)">${p.barcode}</span>`:''}</td>
-      <td><span class="badge badge-cat">${p.cat}</span></td>
+      <td>${esc(p.name)}${p.barcode?`<br><span style="font-size:10px;color:var(--muted);font-family:var(--mono)">${esc(p.barcode)}</span>`:''}</td>
+      <td><span class="badge badge-cat">${esc(p.cat)}</span></td>
       <td style="font-family:var(--mono)">${fmt(p.price)}</td>
       <td style="font-family:var(--mono);color:var(--muted)">${fmt(p.cost||0)}</td>
       <td style="font-family:var(--mono);color:var(--success)">${margin(p)}</td>
@@ -1359,7 +1756,7 @@ function viewStockHistory(id){
     return `<div style="display:flex;justify-content:space-between;padding:8px 10px;background:var(--surface2);border-radius:6px;font-size:13px;">
       <div>
         <div style="font-weight:500;">${typeLabel}</div>
-        <div style="font-size:11px;color:var(--muted);">${d.toLocaleDateString('en-GH')} ${d.toLocaleTimeString('en-GH',{hour:'2-digit',minute:'2-digit'})} · ${l.ref} · By: ${l.by}</div>
+        <div style="font-size:11px;color:var(--muted);">${d.toLocaleDateString('en-GH')} ${d.toLocaleTimeString('en-GH',{hour:'2-digit',minute:'2-digit'})} · ${esc(l.ref)} · By: ${esc(l.by)}</div>
       </div>
       <div style="text-align:right;">
         <div style="font-family:var(--mono);font-weight:600;color:${color};">${l.change>0?'+':''}${l.change}</div>
@@ -1388,8 +1785,8 @@ function renderCustomers(){
   document.getElementById('cust-tbody').innerHTML=list.map(c=>{
     const outstanding=sales.filter(s=>s.customer.toLowerCase()===c.name.toLowerCase()&&s.payment==='Credit'&&!s.creditPaid).reduce((s,x)=>s+x.total,0);
     return `<tr>
-      <td style="font-weight:500;">${c.name}</td>
-      <td style="color:var(--muted)">${c.phone||'—'}</td>
+      <td style="font-weight:500;">${esc(c.name)}</td>
+      <td style="color:var(--muted)">${esc(c.phone)||'—'}</td>
       <td style="font-family:var(--mono);color:var(--accent)">${fmt(c.totalSpent||0)}</td>
       <td style="font-family:var(--mono);color:${outstanding>0?'var(--danger)':'var(--muted)'};">${outstanding>0?fmt(outstanding):'—'}</td>
       <td style="font-size:12px;color:var(--muted)">${c.lastVisit?new Date(c.lastVisit).toLocaleDateString('en-GH'):'Never'}</td>
@@ -1474,12 +1871,12 @@ function renderSales(){
     const d=new Date(s.date);
     const hasAmend=s.amendments&&s.amendments.length>0;
     const netTotal=s.total-(s.amendments||[]).reduce((sum,a)=>sum+(a.refund||0),0);
-    const preview=s.items.slice(0,2).map(i=>i.name).join(', ')+(s.items.length>2?` +${s.items.length-2} more`:'');
+    const preview=s.items.slice(0,2).map(i=>esc(i.name)).join(', ')+(s.items.length>2?` +${s.items.length-2} more`:'');
     const creditBadge=s.payment==='Credit'?(s.creditPaid?'<span class="badge badge-paid" style="margin-left:4px;">Paid</span>':'<span class="badge badge-credit" style="margin-left:4px;">Unpaid</span>'):'';
     return `<tr>
       <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.id}${hasAmend?' <span class="badge badge-low" style="font-size:9px;">amended</span>':''}</td>
       <td style="font-size:12px">${d.toLocaleDateString('en-GH')} ${d.toLocaleTimeString('en-GH',{hour:'2-digit',minute:'2-digit'})}</td>
-      <td>${s.customer}</td>
+      <td>${esc(s.customer)}</td>
       <td style="font-size:12px;color:var(--muted);max-width:180px;">${preview}</td>
       <td><span class="badge badge-cat">${s.payment}</span>${creditBadge}</td>
       <td style="font-family:var(--mono);color:var(--danger)">${s.discount>0?`-${fmt(s.discount)}`:'—'}</td>
@@ -1498,7 +1895,7 @@ function viewSaleDetail(id){
       <div style="font-weight:bold;margin-bottom:6px;">Amendment Log</div>
       ${s.amendments.map(a=>`<div style="border-top:1px dashed #ccc;padding:6px 0;">
         <div style="color:#555;">${new Date(a.date).toLocaleString('en-GH')}</div>
-        <div>${a.type}: ${a.reason}</div>
+        <div>${esc(a.type)}: ${esc(a.reason)}</div>
         ${a.refund>0?`<div style="color:#e05252;">Refund: -${fmt(a.refund)}</div>`:''}
         <div style="color:#888;font-size:10px;">By: ${a.loggedBy||'Staff'}</div>
       </div>`).join('')}
@@ -1556,7 +1953,7 @@ function renderCredits(){
     return `<tr>
       <td style="font-family:var(--mono);font-size:12px;">${s.id}</td>
       <td style="font-size:12px;">${d.toLocaleDateString('en-GH')}</td>
-      <td style="font-weight:500;">${s.customer}</td>
+      <td style="font-weight:500;">${esc(s.customer)}</td>
       <td style="font-family:var(--mono);font-weight:600;color:var(--accent);">${fmt(s.total)}</td>
       <td><span class="badge ${s.creditPaid?'badge-paid':'badge-credit'}">${s.creditPaid?'Paid':'Unpaid'}</span></td>
       <td style="font-size:12px;color:var(--muted);">${s.creditPaid?new Date(s.creditPaidDate).toLocaleDateString('en-GH')+' via '+s.creditPaidMethod:'—'}</td>
@@ -1611,8 +2008,8 @@ function renderExpenses(){
   document.getElementById('exp-tbody').innerHTML=list.map(e=>`
     <tr>
       <td style="font-size:12px">${e.date}</td>
-      <td><span class="badge badge-cat">${e.cat}</span></td>
-      <td>${e.desc}</td>
+      <td><span class="badge badge-cat">${esc(e.cat)}</span></td>
+      <td>${esc(e.desc)}</td>
       <td style="font-family:var(--mono);color:var(--danger);font-weight:600">${fmt(e.amount)}</td>
       <td style="color:var(--muted)">${e.paidBy||'—'}</td>
       <td><button class="act-btn danger" onclick="deleteExpense('${e.id}')">Delete</button></td>
@@ -1703,7 +2100,7 @@ function renderProfit(){
     return `<tr>
       <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${r.id}</td>
       <td style="font-size:12px">${d.toLocaleDateString('en-GH')}</td>
-      <td>${r.customer}</td>
+      <td>${esc(r.customer)}</td>
       <td style="font-family:var(--mono)">${fmt(r.netTotal)}${r.refunds>0?` <span style="color:var(--danger);font-size:10px;">(-${fmt(r.refunds)})</span>`:''}</td>
       <td style="font-family:var(--mono);color:var(--muted)">${fmt(r.cogs)}</td>
       <td style="font-family:var(--mono);color:var(--danger)">${r.discount>0?`-${fmt(r.discount)}`:'—'}</td>
@@ -1736,7 +2133,7 @@ function renderBestSellers(){
       <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">
         <div style="width:24px;text-align:center;font-family:var(--mono);font-size:13px;color:var(--muted);">${i+1}</div>
         <div style="flex:1;">
-          <div style="font-size:13px;font-weight:500;margin-bottom:4px;">${p.name}</div>
+          <div style="font-size:13px;font-weight:500;margin-bottom:4px;">${esc(p.name)}</div>
           <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
             <div style="height:100%;width:${Math.round(p.qty/maxQty*100)}%;background:var(--accent);border-radius:3px;"></div>
           </div>
@@ -1793,7 +2190,7 @@ function renderDashboard(){
   if(!lowItems.length)lowEl.innerHTML=`<div style="color:var(--success);font-size:12px;">All products have sufficient stock ✓</div>`;
   else lowEl.innerHTML=lowItems.slice(0,6).map(p=>`
     <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);">
-      <span style="font-size:13px;">${p.name}</span>
+      <span style="font-size:13px;">${esc(p.name)}</span>
       <span style="font-family:var(--mono);color:${p.stock===0?'var(--danger)':'var(--accent)'};">${p.stock===0?'OUT':p.stock+' left'}</span>
     </div>`).join('')+(lowItems.length>6?`<div style="color:var(--muted);font-size:11px;margin-top:6px;">+${lowItems.length-6} more</div>`:'');
   const recentEl=document.getElementById('dash-recent-sales');
@@ -1802,7 +2199,7 @@ function renderDashboard(){
     const d=new Date(s.date);
     return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);">
       <div>
-        <div style="font-size:12px;">${s.customer}${s.payment==='Credit'&&!s.creditPaid?' <span class="badge badge-credit" style="font-size:9px;">credit</span>':''}</div>
+        <div style="font-size:12px;">${esc(s.customer)}${s.payment==='Credit'&&!s.creditPaid?' <span class="badge badge-credit" style="font-size:9px;">credit</span>':''}</div>
         <div style="font-size:11px;color:var(--muted);">${s.id} · ${d.toLocaleTimeString('en-GH',{hour:'2-digit',minute:'2-digit'})}</div>
       </div>
       <div style="font-family:var(--mono);color:var(--accent);font-weight:600;">${fmt(s.total)}</div>
@@ -1828,7 +2225,7 @@ function showEndOfDay(){
   document.getElementById('eod-date').textContent=new Date().toLocaleDateString('en-GH',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   document.getElementById('eod-content').innerHTML=`
     <div id="printable-eod" style="font-family:var(--mono);font-size:13px;line-height:2;">
-      <div style="text-align:center;font-size:15px;font-weight:bold;">${settings.shopName}</div>
+      <div style="text-align:center;font-size:15px;font-weight:bold;">${esc(settings.shopName)}</div>
       <div style="text-align:center;font-size:10px;color:var(--muted);margin-bottom:10px;">END OF DAY — ${new Date().toLocaleDateString('en-GH')}</div>
       <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:4px;"><span style="color:var(--muted)">Total Transactions</span><span>${todaySales.length}</span></div>
       <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">Gross Revenue</span><span>${fmt(revenue)}</span></div>
@@ -1846,11 +2243,11 @@ function showEndOfDay(){
       ${creditSales>0?`<div style="margin-top:8px;padding:6px;background:rgba(224,82,82,.1);border-radius:4px;"><span style="color:var(--danger);">Credit Sales (may be uncollected): ${fmt(creditSales)}</span></div>`:''}
       ${todayExp.length?`<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border);">
         <div style="color:var(--muted);font-size:11px;margin-bottom:4px;">EXPENSES</div>
-        ${todayExp.map(e=>`<div style="display:flex;justify-content:space-between;font-size:12px;"><span style="color:var(--muted)">${e.cat}: ${e.desc}</span><span>${fmt(e.amount)}</span></div>`).join('')}
+        ${todayExp.map(e=>`<div style="display:flex;justify-content:space-between;font-size:12px;"><span style="color:var(--muted)">${esc(e.cat)}: ${esc(e.desc)}</span><span>${fmt(e.amount)}</span></div>`).join('')}
       </div>`:''}
       ${todaySales.length?`<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border);">
         <div style="color:var(--muted);font-size:11px;margin-bottom:4px;">ALL TRANSACTIONS</div>
-        ${todaySales.map(s=>`<div style="display:flex;justify-content:space-between;font-size:11px;"><span>${s.id} · ${s.customer} · ${s.payment}</span><span>${fmt(s.total)}</span></div>`).join('')}
+        ${todaySales.map(s=>`<div style="display:flex;justify-content:space-between;font-size:11px;"><span>${s.id} · ${esc(s.customer)} · ${s.payment}</span><span>${fmt(s.total)}</span></div>`).join('')}
       </div>`:''}
       <div style="text-align:center;color:var(--muted);font-size:10px;margin-top:12px;padding-top:8px;border-top:1px solid var(--border);">Printed ${new Date().toLocaleString('en-GH')}</div>
     </div>`;
@@ -1918,7 +2315,8 @@ function showHelp(tab){
 // DATA MANAGEMENT
 // ═══════════════════════════════════════
 async function backupData(){
-  const data={products,sales,settings,customers,expenses,stocklog,exportedAt:new Date().toISOString(),version:'3.0'};
+  const exportSettings=Object.assign({},settings);delete exportSettings._auth; // PIN data is never exported
+  const data={products,sales,settings:exportSettings,customers,expenses,stocklog,exportedAt:new Date().toISOString(),version:'3.0'};
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
   a.download='voltpos_backup_'+today()+'.json';a.click();toast('Backup downloaded.');
@@ -1936,7 +2334,7 @@ async function restoreData(event){
       customers=data.customers||[];await save(KEY.customers,customers);
       expenses=data.expenses||[];await save(KEY.expenses,expenses);
       stocklog=data.stocklog||[];await save(KEY.stocklog,stocklog);
-      if(data.settings){settings=Object.assign({invoiceStart:1},data.settings);await save(KEY.settings,settings);}
+      if(data.settings){const keepAuth=settings._auth;settings=Object.assign({invoiceStart:1},data.settings);settings._auth=keepAuth;await save(KEY.settings,settings);}
       renderProductGrid();buildCatFilter();renderDashboard();toast('Data restored!');
     }catch{toast('Could not read backup file.');}
   };
@@ -1960,7 +2358,7 @@ function downloadCSV(filename,rows){
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download=filename;a.click();
 }
 function closeModal(id){document.getElementById(id).classList.remove('open');}
-document.querySelectorAll('.modal-bg').forEach(bg=>bg.addEventListener('click',e=>{if(e.target===bg)bg.classList.remove('open');}));
+document.querySelectorAll('.modal-bg:not(#modal-recovery)').forEach(bg=>bg.addEventListener('click',e=>{if(e.target===bg)bg.classList.remove('open');}));
 let toastTimer;
 function toast(msg){
   const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');
@@ -1985,21 +2383,51 @@ function installApp(){
   else{document.getElementById('install-now-btn').textContent='Use browser ⊕ icon to install';document.getElementById('install-now-btn').disabled=true;}
 }
 window.addEventListener('appinstalled',()=>{document.getElementById('header-install-btn').style.display='none';closeInstallModal();toast('VoltPOS installed!');});
-if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+if('serviceWorker'in navigator&&!(window.voltposNative&&window.voltposNative.isElectron))navigator.serviceWorker.register('sw.js').catch(()=>{}); // not needed (and can serve stale files) inside the desktop app
 
 // ═══════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════
-async function init(){
-  await loadSettingsFromServer();
+// One-time move of PINs/setup flag from old localStorage into the server-side settings.json
+async function migrateLegacyAuth(){
+  const old={};let found=false;
+  for(const [role,key] of Object.entries(LEGACY_PIN_KEYS)){const v=localStorage.getItem(key);if(v){old[role]=v;found=true;}}
+  const setupDone=!!localStorage.getItem('vp_setup_done');
+  if(!found&&!setupDone)return null;
+  const r=await authAPI('migrate',{pins:old,setupDone});
+  if(r.ok){
+    // Only delete the old copies once the server has confirmed it holds them.
+    Object.values(LEGACY_PIN_KEYS).forEach(k=>localStorage.removeItem(k));
+    localStorage.removeItem('vp_setup_done');
+    applyAuth(r.auth);
+    return r.recoveryCode||null;
+  }
+  return null;
+}
+
+async function loadAppData(){
   const[p,s,c,e,sl]=await Promise.all([load(KEY.products),load(KEY.sales),load(KEY.customers),load(KEY.expenses),load(KEY.stocklog)]);
   products=p||[];sales=s||[];customers=c||[];expenses=e||[];stocklog=sl||[];
   buildCatFilter();renderProductGrid();renderDashboard();
-  const setupDone=localStorage.getItem('vp_setup_done');
-  if(!setupDone){showWizard();}
-  else if(anyPINSet()){showPINScreen();}
+}
+
+async function init(){
+  if(window.voltposNative&&window.voltposNative.isElectron){ // running as the installed desktop app
+    document.body.classList.add('is-electron');
+    const a=document.getElementById('sec-install');if(a)a.style.display='none';
+    const b=document.getElementById('header-install-btn');if(b)b.remove();
+    const c=document.getElementById('open-data-btn');if(c)c.style.display='';
+  }
+  await loadSettingsFromServer();
+  let migratedCode=null;
+  if(!(settings._auth&&settings._auth.setupComplete))migratedCode=await migrateLegacyAuth();
+  // ── Setup lock: nothing else loads or renders until setup is complete
+  if(!(settings._auth&&settings._auth.setupComplete)){showWizard();return;}
+  await loadAppData();
+  if(anyPINSet()){showPINScreen();}
   else{applyRole(null);}
   resetInactivity();
+  if(migratedCode)showRecoveryModal(migratedCode);
 }
 init();
 </script>
