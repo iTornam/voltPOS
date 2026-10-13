@@ -283,6 +283,7 @@ body.gated>*:not(#wizard-screen):not(#toast):not(script){display:none!important}
   <div class="toolbar">
     <input class="search-box" style="max-width:280px;" type="text" id="inv-search" placeholder="Search products…" oninput="renderInventory()">
     <button class="btn btn-primary" onclick="openAddProduct()">+ Add Product</button>
+    <button class="btn btn-secondary" onclick="openCategories()">🏷 Categories</button>
     <button class="help-btn" onclick="showHelp('inventory')">?</button>
     <button class="btn btn-secondary" style="margin-left:auto;" onclick="exportInventoryCSV()">⬇ Export</button>
   </div>
@@ -577,6 +578,19 @@ body.gated>*:not(#wizard-screen):not(#toast):not(script){display:none!important}
 </div>
 
 <!-- MODALS -->
+<!-- Manage categories -->
+<div class="modal-bg" id="modal-categories">
+  <div class="modal" style="max-width:520px;">
+    <h3>🏷 Product Categories</h3>
+    <div style="font-size:12px;color:var(--muted);line-height:1.6;">These are the categories you pick from when adding a product. Renaming one updates every product in it. Deleting one asks where to move its products.</div>
+    <div style="display:flex;gap:8px;">
+      <input class="form-input" id="cat-new" type="text" maxlength="40" placeholder="New category name" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addCategoryFromManager();}">
+      <button class="btn btn-primary" onclick="addCategoryFromManager()">+ Add</button>
+    </div>
+    <div id="cat-list" style="display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow-y:auto;"></div>
+    <div style="display:flex;justify-content:flex-end;"><button class="btn btn-primary" onclick="closeModal('modal-categories')">Done</button></div>
+  </div>
+</div>
 <!-- Recovery code (shown once) -->
 <div class="modal-bg" id="modal-recovery" style="z-index:600">
   <div class="modal">
@@ -592,12 +606,8 @@ body.gated>*:not(#wizard-screen):not(#toast):not(script){display:none!important}
     <h3 id="modal-product-title">Add Product</h3>
     <div class="form-row"><label>Product Name *</label><input class="form-input" id="p-name" type="text"></div>
     <div class="form-row"><label>Category *</label>
-      <select class="form-input" id="p-cat">
-        <option>General</option><option>Lighting</option><option>Cables & Wiring</option><option>Switches & Sockets</option>
-        <option>Breakers & Panels</option><option>Tools</option><option>Batteries</option><option>Electronics</option>
-        <option>Motors & Fans</option><option>Conduits & Fittings</option><option>Food & Drinks</option>
-        <option>Clothing</option><option>Pharmaceuticals</option><option>Stationery</option><option>Other</option>
-      </select>
+      <div style="display:flex;gap:6px;"><select class="form-input" id="p-cat" style="flex:1"></select><button class="btn btn-secondary" type="button" onclick="toggleNewCat()" title="Create a new category">＋ New</button></div>
+      <div id="p-newcat-row" style="display:none;gap:6px;margin-top:6px;"><input class="form-input" id="p-newcat" type="text" maxlength="40" placeholder="New category name" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addCategoryFromProduct();}"><button class="btn btn-primary" type="button" onclick="addCategoryFromProduct()">Add</button></div>
     </div>
     <div class="form-row-2">
       <div class="form-row"><label>Selling Price *</label><input class="form-input" id="p-price" type="number" min="0" step="0.01" placeholder="0.00"></div>
@@ -1204,6 +1214,7 @@ const TOUR={
   inventory:[
     {sel:'#inv-search',title:'Search your stock',text:'Find a product by name, category or barcode.'},
     {sel:'#view-inventory [onclick="openAddProduct()"]',title:'Add a product',text:'Enter the selling price, <b>cost price</b>, stock quantity and a low-stock level. The cost price is what makes your profit figures accurate.'},
+    {sel:'#view-inventory [onclick="openCategories()"]',title:'Your categories',text:'Create, rename or delete your own categories. Renaming updates all its products. Deleting asks where to move them. You can also add one on the spot with <b>＋ New</b> in the product form.'},
     {sel:'#view-inventory .table-wrap',title:'Your stock list',text:'Each row has <b>Edit</b>, <b>Restock</b> (add new stock and log it), <b>History</b> (every stock change, ever) and <b>Delete</b>.'},
     {sel:'#view-inventory [onclick="exportInventoryCSV()"]',title:'Export',text:'Download your stock list as a spreadsheet (CSV).'},
   ],
@@ -1378,6 +1389,132 @@ function dismissTourOffer(start){
   try{localStorage.setItem('vp_tour_seen_'+(currentRole||'open'),'1');}catch{}
   document.getElementById('tour-offer').classList.remove('on');
   if(start)startTour('full');
+}
+
+// ═══════════════════════════════════════
+// CATEGORIES (user-managed, saved in settings.categories)
+// ═══════════════════════════════════════
+const DEFAULT_CATS=['General','Lighting','Cables & Wiring','Switches & Sockets','Breakers & Panels','Tools','Batteries','Electronics','Motors & Fans','Conduits & Fittings','Food & Drinks','Clothing','Pharmaceuticals','Stationery','Other'];
+let catEdit=null; // {mode:'rename'|'delete', name} — which row of the manager is open for editing
+function getCategories(){
+  const base=Array.isArray(settings.categories)&&settings.categories.length?settings.categories:DEFAULT_CATS;
+  // Products keep working even if their category isn't in the saved list (old data / restored backups)
+  const extra=[...new Set(products.map(p=>p.cat).filter(c=>c&&!base.includes(c)))];
+  return [...base,...extra];
+}
+function cleanCatName(raw){return String(raw||'').replace(/\s+/g,' ').trim().slice(0,40);}
+function findCat(name,except){const k=name.toLowerCase();return getCategories().find(c=>c.toLowerCase()===k&&c!==except);}
+function catCount(name){return products.filter(p=>p.cat===name).length;}
+async function persistCategories(list){settings.categories=list;await save(KEY.settings,settings);}
+function refreshCategoryViews(){
+  fillCategorySelect();renderInventory();buildCatFilter();renderProductGrid();
+  if(document.getElementById('modal-categories').classList.contains('open'))renderCategoryList();
+}
+function fillCategorySelect(selected){
+  const sel=document.getElementById('p-cat'),want=selected!==undefined?selected:sel.value;
+  sel.innerHTML='';
+  getCategories().forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;sel.appendChild(o);});
+  if([...sel.options].some(o=>o.value===want))sel.value=want;else if(sel.options.length)sel.selectedIndex=0;
+}
+async function addCategory(raw){
+  const name=cleanCatName(raw);
+  if(!name){toast('Type a category name.');return null;}
+  const dup=findCat(name);
+  if(dup){toast('That category already exists.');return dup;}
+  await persistCategories([...getCategories(),name]);
+  return name;
+}
+
+// — inside the Add/Edit Product form
+function toggleNewCat(){
+  const row=document.getElementById('p-newcat-row'),open=row.style.display==='none';
+  row.style.display=open?'flex':'none';
+  if(open)document.getElementById('p-newcat').focus();
+}
+async function addCategoryFromProduct(){
+  const input=document.getElementById('p-newcat');
+  const name=await addCategory(input.value);
+  if(!name)return;
+  input.value='';document.getElementById('p-newcat-row').style.display='none';
+  fillCategorySelect(name);buildCatFilter();
+  toast('Category "'+name+'" ready to use.');
+}
+async function commitPendingCategory(){ // typed a new category but forgot to press Add? Add it for them.
+  const row=document.getElementById('p-newcat-row'),input=document.getElementById('p-newcat');
+  if(row.style.display!=='none'&&input.value.trim())await addCategoryFromProduct();
+}
+
+// — the Manage Categories window
+function openCategories(){
+  catEdit=null;document.getElementById('cat-new').value='';
+  renderCategoryList();
+  document.getElementById('modal-categories').classList.add('open');
+}
+async function addCategoryFromManager(){
+  const input=document.getElementById('cat-new');
+  const name=await addCategory(input.value);
+  if(!name)return;
+  input.value='';refreshCategoryViews();
+}
+function renderCategoryList(){
+  const box=document.getElementById('cat-list');box.innerHTML='';
+  const cats=getCategories();
+  const mk=(tag,props,kids)=>{const e=document.createElement(tag);Object.assign(e,props||{});(kids||[]).forEach(k=>e.appendChild(typeof k==='string'?document.createTextNode(k):k));return e;};
+  const btn=(label,fn,danger)=>{const b=mk('button',{className:'act-btn',type:'button',textContent:label});b.style.margin='0';if(danger)b.style.color='var(--danger)';b.onclick=fn;return b;};
+  cats.forEach(name=>{
+    const n=catCount(name);
+    const row=mk('div');row.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;';
+    if(catEdit&&catEdit.name===name&&catEdit.mode==='rename'){
+      const inp=mk('input',{className:'form-input',type:'text',value:name,maxLength:40});inp.style.cssText='flex:1;min-width:140px;';
+      inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();renameCategory(name,inp.value);}if(e.key==='Escape'){e.stopPropagation();catEdit=null;renderCategoryList();}};
+      row.append(inp,btn('Save',()=>renameCategory(name,inp.value)),btn('Cancel',()=>{catEdit=null;renderCategoryList();}));
+      box.appendChild(row);setTimeout(()=>{inp.focus();inp.select();},0);return;
+    }
+    if(catEdit&&catEdit.name===name&&catEdit.mode==='delete'){
+      row.style.borderColor='var(--danger)';
+      if(cats.length<=1){
+        row.append(mk('span',{textContent:'You need at least one category.'}),btn('OK',()=>{catEdit=null;renderCategoryList();}));
+      } else if(n===0){
+        row.append(mk('span',{textContent:'Delete "'+name+'"?'}),btn('Delete',()=>deleteCategory(name),true),btn('Cancel',()=>{catEdit=null;renderCategoryList();}));
+      } else {
+        const others=cats.filter(c=>c!==name);
+        const sel=mk('select',{className:'form-input'});sel.style.cssText='flex:1;min-width:140px;';
+        others.forEach(c=>{const o=mk('option',{value:c,textContent:c});sel.appendChild(o);});
+        sel.value=others.includes('General')?'General':others[0];
+        row.append(mk('span',{textContent:n+' product'+(n===1?'':'s')+' use "'+name+'". Move them to:'}),sel,btn('Move & Delete',()=>deleteCategory(name,sel.value),true),btn('Cancel',()=>{catEdit=null;renderCategoryList();}));
+      }
+      box.appendChild(row);return;
+    }
+    const label=mk('span',{textContent:name});label.style.cssText='flex:1;min-width:120px;font-weight:500;';
+    const cnt=mk('span',{textContent:n+(n===1?' product':' products')});cnt.style.cssText='font-size:11px;color:var(--muted);font-family:var(--mono);';
+    row.append(label,cnt,btn('Rename',()=>{catEdit={mode:'rename',name};renderCategoryList();}),btn('Delete',()=>{catEdit={mode:'delete',name};renderCategoryList();},true));
+    box.appendChild(row);
+  });
+}
+async function renameCategory(oldName,raw){
+  const name=cleanCatName(raw);
+  if(!name){toast('Type a category name.');return;}
+  if(name===oldName){catEdit=null;renderCategoryList();return;}
+  if(findCat(name,oldName)){toast('Another category already has that name.');return;}
+  const list=getCategories().map(c=>c===oldName?name:c);
+  products.forEach(p=>{if(p.cat===oldName)p.cat=name;});
+  if(activeCategory===oldName)activeCategory=name;
+  await save(KEY.products,products);await persistCategories(list);
+  catEdit=null;refreshCategoryViews();toast('Renamed to "'+name+'".');
+}
+async function deleteCategory(name,moveTo){
+  const list=getCategories();
+  if(list.length<=1){toast('You need at least one category.');return;}
+  const n=catCount(name);
+  if(n>0){
+    if(!moveTo||moveTo===name||!list.includes(moveTo)){toast('Choose where to move the products.');return;}
+    products.forEach(p=>{if(p.cat===name)p.cat=moveTo;});
+    await save(KEY.products,products);
+  }
+  if(activeCategory===name)activeCategory='All';
+  await persistCategories(list.filter(c=>c!==name));
+  catEdit=null;refreshCategoryViews();
+  toast(n>0?'Deleted. '+n+' product'+(n===1?'':'s')+' moved to "'+moveTo+'".':'Category deleted.');
 }
 
 // ═══════════════════════════════════════
@@ -1661,7 +1798,8 @@ function openAddProduct(){
   editingId=null;
   document.getElementById('modal-product-title').textContent='Add Product';
   ['p-name','p-price','p-cost','p-stock','p-low','p-barcode'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('p-cat').value='General';
+  fillCategorySelect(getCategories().includes('General')?'General':getCategories()[0]);
+  document.getElementById('p-newcat').value='';document.getElementById('p-newcat-row').style.display='none';
   document.getElementById('modal-product').classList.add('open');
 }
 function openEditProduct(id){
@@ -1669,7 +1807,8 @@ function openEditProduct(id){
   editingId=id;
   document.getElementById('modal-product-title').textContent='Edit Product';
   document.getElementById('p-name').value=p.name;
-  document.getElementById('p-cat').value=p.cat;
+  fillCategorySelect(p.cat);
+  document.getElementById('p-newcat').value='';document.getElementById('p-newcat-row').style.display='none';
   document.getElementById('p-price').value=p.price;
   document.getElementById('p-cost').value=p.cost||'';
   document.getElementById('p-stock').value=p.stock;
@@ -1678,6 +1817,7 @@ function openEditProduct(id){
   document.getElementById('modal-product').classList.add('open');
 }
 async function saveProduct(){
+  await commitPendingCategory();
   const name=document.getElementById('p-name').value.trim();
   const cat=document.getElementById('p-cat').value;
   const price=parseFloat(document.getElementById('p-price').value);
@@ -2406,6 +2546,7 @@ async function migrateLegacyAuth(){
 }
 
 async function loadAppData(){
+  fillCategorySelect();
   const[p,s,c,e,sl]=await Promise.all([load(KEY.products),load(KEY.sales),load(KEY.customers),load(KEY.expenses),load(KEY.stocklog)]);
   products=p||[];sales=s||[];customers=c||[];expenses=e||[];stocklog=sl||[];
   buildCatFilter();renderProductGrid();renderDashboard();

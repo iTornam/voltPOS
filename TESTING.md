@@ -42,3 +42,9 @@ Add a product (Inventory) → sell it (POS → ⚡ Charge) → **🖨 Print Rece
 
 ## 6. Quick regression pass (things I did not change but you should still click)
 POS sale (cash + credit) · Mark credit paid · Amend a sale · Restock + stock history · Add expense · Profit report + Best Sellers · Backup → Restore · CSV exports · Light/Dark toggle.
+
+## 7. Categories (new)
+Inventory → **🏷 Categories**: add, rename, delete. Renaming updates every product in it; deleting one that has products asks where to move them. In the product form, **＋ New** adds a category on the spot. The list is saved in settings.json and included in backups.
+
+## 8. Sample data (optional)
+`voltpos-sample-data.json` = 46 products, 70 sales over a month (incl. 9 unpaid credit sales), 10 customers, 12 expenses, stock history. Load it with **Settings → Restore Backup**. Three products are deliberately sold out and five are low on stock. Sold-out items disappear from the POS screen (by design) but stay in Inventory marked OUT.
