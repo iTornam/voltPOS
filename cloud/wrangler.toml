@@ -1,0 +1,10 @@
+# Cloudflare Worker config for the VoltPOS remote dashboard.
+name = "voltpos-remote"          # becomes https://voltpos-remote.<your-subdomain>.workers.dev
+main = "worker.js"
+compatibility_date = "2024-09-23"
+
+# After running:  npx wrangler kv namespace create VOLT
+# paste the id it prints here:
+[[kv_namespaces]]
+binding = "VOLT"
+id = "PASTE_KV_NAMESPACE_ID_HERE"

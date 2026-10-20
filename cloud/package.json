@@ -1,0 +1,13 @@
+{
+  "name": "voltpos-remote",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker that hosts the VoltPOS remote dashboard (owner's online page)",
+  "scripts": {
+    "build": "node build.js",
+    "deploy": "node build.js && wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
