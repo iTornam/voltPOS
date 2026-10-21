@@ -618,6 +618,19 @@ function buildMenu() {
       ]
     }] : []),
     {
+      // Without an Edit menu, Cmd/Ctrl + C, V, X, A and Z do nothing inside the app (Electron needs these roles).
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ]
+    },
+    {
       label: 'File',
       submenu: [
         {
