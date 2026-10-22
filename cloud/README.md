@@ -8,9 +8,17 @@ This lets an owner open **one web page on his phone** and see how his shop(s) ar
 ```
 
 * The shop **keeps working with no internet**. It sends a snapshot about 30 seconds after any sale/stock/expense change, and every 20 minutes while the app is open. If the internet is down it simply catches up later.
-* **What is sent:** totals, the last 30 sales (customer name, amount, payment type), stock levels, top products, recent expenses, credit owed per customer name.
+* **What is sent:** totals, every sale from the last 7 days (customer name, items sold, amount, payment type), stock levels, top products, recent expenses, credit owed per customer name.
 * **What is never sent:** PINs, recovery codes, customer phone numbers, the full customer list, or the full sales/product database.
 * The page is not "live to the second". It is as fresh as the last update (a coloured dot shows how fresh: green is under 45 min).
+
+## What the owner sees
+* **Needs attention** strip at the top: shops that haven't updated for 3+ hours, sold-out and low-stock products, and unpaid credit.
+* **Today** cards: revenue (with yesterday's total and a ▲/▼ change), profit, cash, MoMo/card, expenses, credit owed.
+* **Sales: last 7 days** — every sale, grouped by day with each day's total. Tap a sale to see what was sold (item, quantity, line total, discount). Search by customer or product. If a shop sells more than 400 in a week, the page says it is showing the latest 400.
+* **Last 7 and 30 days**, a **14-day chart** (tap a bar to see that day), best sellers, who owes money, and recent expenses.
+* **Hide profit** button (remembers the choice), automatic light/dark mode, and an icon so it can be added to the phone's home screen.
+* It is **view-only**. Nothing can be changed from the page.
 
 ## One-time setup (you do this once for ALL your clients)
 

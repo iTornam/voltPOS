@@ -60,3 +60,9 @@ Deploy the cloud part once by following `cloud/README.md`. Then per client:
 4. Make a sale in the shop. Within about 30 seconds it shows on the page (press Refresh).
 5. Switch the shop's internet off, make a sale (it must work normally), switch it back on → press **Send update now** and the page catches up.
 6. If an Owner PIN is set, only the logged-in Owner can change these settings.
+
+## 11. Owner page extras (cloud update)
+After redeploying (`cd cloud && npm run deploy`), open the owner page and check: the **Needs attention** strip, yesterday's total with ▲/▼ under today's revenue, tapping a chart bar shows that day, **🙈 Hide profit** masks every profit figure and remembers it after refresh, and the page follows the phone's light/dark setting. Browser menu → "Add to Home Screen" gives a VoltPOS icon.
+
+## 12. Sales with items (3.3.0)
+Needs the 3.3.0 installer in the shop **and** the cloud update deployed (`cd cloud && npm run deploy`). On the owner page open a shop: **Sales: last 7 days** lists every sale from the past week, grouped by day with day totals. Tap a sale to see its items and discount. Search by customer or product. A shop still on an older version shows item counts and a note asking to update the shop app.

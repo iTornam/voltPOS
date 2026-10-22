@@ -11,6 +11,10 @@
 
 const VIEWER_HTML = __VIEWER_HTML__;
 
+const ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#0e1117"/><path d="M56 12 28 56h20l-4 32 28-44H52z" fill="#f5c400"/></svg>';
+const MANIFEST = JSON.stringify({ name: 'VoltPOS Dashboard', short_name: 'VoltPOS', start_url: '/', display: 'standalone',
+  background_color: '#0e1117', theme_color: '#0e1117', icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }] });
+
 const enc = new TextEncoder();
 const SESSION_TTL = 8 * 3600;
 const MAX_BODY = 250 * 1024;
@@ -167,9 +171,11 @@ async function route(request, env) {
   if (m === 'GET' && (pathname === '/' || pathname === '/index.html')) {
     return new Response(VIEWER_HTML, { headers: {
       'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SEC,
-      'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'",
+      'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'",
     } });
   }
+  if (m === 'GET' && pathname === '/manifest.json') return new Response(MANIFEST, { headers: { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'public, max-age=86400', ...SEC } });
+  if (m === 'GET' && pathname === '/icon.svg') return new Response(ICON_SVG, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400', ...SEC } });
   if (m === 'GET' && pathname === '/api/health') return json({ ok: true, service: 'voltpos-remote' });
   if (m === 'POST' && pathname === '/api/push') return push(request, env);
   if (m === 'POST' && pathname === '/api/login') return login(request, env);
