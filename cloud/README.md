@@ -57,6 +57,8 @@ node manage.js create https://voltpos-remote.yourname.workers.dev  YOUR_ADMIN_TO
      "Kofi Stores" "A-good-password" "Accra Shop" "Kumasi Shop"
 ```
 
+Add `--code KOFISTORES2` to choose the account code yourself (6 to 16 letters and numbers only, no spaces or symbols). Without it, a random code is generated. Put the password in **single quotes**, so characters like `!` don't confuse the Terminal.
+
 It prints the owner page address, account code and password, plus a **server address, account code, shop ID and shop key for each shop**.
 
 1. **At each shop:** VoltPOS → Settings → **📡 Remote Dashboard**. Type in the four values, tick **Send updates**, press **Save**. It sends straight away and shows "✓ Last update sent".

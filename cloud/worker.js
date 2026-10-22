@@ -53,7 +53,8 @@ async function readJSON(request) {
   try { const v = JSON.parse(text || '{}'); if (v && typeof v === 'object') return v; } catch (e) {}
   throw new HttpError(400, 'Bad request');
 }
-const getAcct = async (env, code) => (/^[A-Z2-9]{6,16}$/.test(code) ? env.VOLT.get('acct:' + code, 'json') : null);
+const CODE_RE = /^[A-Z0-9]{6,16}$/; // letters + digits only, 6 to 16 characters (the shop app checks the same rule)
+const getAcct = async (env, code) => (CODE_RE.test(code) ? env.VOLT.get('acct:' + code, 'json') : null);
 const cleanName = (v, max) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, max);
 
 async function newPasswordRecord(password) {
@@ -124,7 +125,13 @@ async function admin(request, env, action) {
     const password = String(b.password || '');
     const shopNames = (Array.isArray(b.shops) ? b.shops : []).map((n) => cleanName(n, 60)).filter(Boolean).slice(0, 10);
     if (!name || password.length < 8 || !shopNames.length) throw new HttpError(400, 'Need name, password (8+ characters) and at least one shop.');
-    let code; do { code = randomString(10); } while (await env.VOLT.get('acct:' + code));
+    let code = String(b.code || '').replace(/\s+/g, '').toUpperCase();
+    if (code) {
+      if (!CODE_RE.test(code)) throw new HttpError(400, 'Account code must be 6 to 16 letters and numbers only (no spaces or symbols).');
+      if (await env.VOLT.get('acct:' + code)) throw new HttpError(409, 'That account code is already taken. Choose another.');
+    } else {
+      do { code = randomString(10); } while (await env.VOLT.get('acct:' + code));
+    }
     const shops = []; const keys = [];
     for (let i = 0; i < shopNames.length; i++) {
       const key = randomString(24);

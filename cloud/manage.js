@@ -1,12 +1,17 @@
 // Manage client accounts on your deployed remote-dashboard server.
 //
-//   node manage.js create <server-url> <admin-token> "Client name" "Password (8+ chars)" "Shop 1" ["Shop 2" ...]
+//   node manage.js create <server-url> <admin-token> "Client name" 'Password (8+ chars)' "Shop 1" ["Shop 2" ...] [--code KOFISTORES]
 //   node manage.js add-shop <server-url> <admin-token> <ACCOUNT> "Shop name"
 //   node manage.js reset-password <server-url> <admin-token> <ACCOUNT> "New password (8+ chars)"
 //   node manage.js delete <server-url> <admin-token> <ACCOUNT>
 //
 // The shop keys are shown ONCE. Copy them straight into each shop's Settings -> Remote Dashboard.
-const [, , cmd, server, token, ...rest] = process.argv;
+// optional:  --code KOFISTORES   (choose the account code yourself: 6-16 letters/numbers, no spaces)
+const argv = process.argv.slice(2);
+let chosenCode = '';
+const ci = argv.indexOf('--code');
+if (ci !== -1) { chosenCode = argv[ci + 1] || ''; argv.splice(ci, 2); }
+const [cmd, server, token, ...rest] = argv;
 
 async function call(action, body) {
   const r = await fetch(server.replace(/\/+$/, '') + '/api/admin/' + action, {
@@ -22,7 +27,7 @@ const base = (server || '').replace(/\/+$/, '');
 
 if (cmd === 'create' && server && token && rest.length >= 3) {
   const [name, password, ...shops] = rest;
-  const j = await call('account', { name, password, shops });
+  const j = await call('account', { name, password, shops, code: chosenCode });
   console.log(`\nAccount created for "${name}"\n`);
   console.log(`  Owner page:    ${base}`);
   console.log(`  Account code:  ${j.account}`);
@@ -49,7 +54,7 @@ if (cmd === 'create' && server && token && rest.length >= 3) {
 }
 function fs_usage() {
   return `Usage:
-  node manage.js create <server-url> <admin-token> "Client name" "Password" "Shop 1" ["Shop 2" ...]
+  node manage.js create <server-url> <admin-token> "Client name" 'Password' "Shop 1" ["Shop 2" ...] [--code KOFISTORES]
   node manage.js add-shop <server-url> <admin-token> <ACCOUNT> "Shop name"
   node manage.js reset-password <server-url> <admin-token> <ACCOUNT> "New password"
   node manage.js delete <server-url> <admin-token> <ACCOUNT>`;
