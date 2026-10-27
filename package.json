@@ -1,6 +1,6 @@
 {
   "name": "voltpos",
-  "version": "3.0.0",
+  "version": "3.3.0",
   "description": "VoltPOS — Point of Sale System for retail businesses",
   "main": "main.js",
   "author": {
