@@ -48,21 +48,3 @@ Inventory → **🏷 Categories**: add, rename, delete. Renaming updates every p
 
 ## 8. Sample data (optional)
 `voltpos-sample-data.json` = 46 products, 70 sales over a month (incl. 9 unpaid credit sales), 10 customers, 12 expenses, stock history. Load it with **Settings → Restore Backup**. Three products are deliberately sold out and five are low on stock. Sold-out items disappear from the POS screen (by design) but stay in Inventory marked OUT.
-
-## 9. Sold-out products on the POS (changed in 3.2.0)
-Products with 0 stock now stay visible on the POS screen, greyed out with "OUT OF STOCK", listed after the in-stock ones. They can't be added to the cart. Before, they silently disappeared, and if every product was at 0 the screen said "No products yet". Adding a product with 0 stock shows a reminder to restock it.
-
-## 10. Remote Dashboard (new in 3.2.0, optional)
-Deploy the cloud part once by following `cloud/README.md`. Then per client:
-1. `node manage.js create <server-url> <admin-token> "Client" "Password" "Shop 1" "Shop 2"`.
-2. In each shop's VoltPOS: Settings → **📡 Remote Dashboard**. Enter server address, account code, shop ID and shop key, tick **Send updates**, press **Save**. You should see "✓ Last update sent".
-3. Open the server address on a phone, sign in with the account code and password. You should see the shop(s), today's numbers, recent sales, low stock, who owes money.
-4. Make a sale in the shop. Within about 30 seconds it shows on the page (press Refresh).
-5. Switch the shop's internet off, make a sale (it must work normally), switch it back on → press **Send update now** and the page catches up.
-6. If an Owner PIN is set, only the logged-in Owner can change these settings.
-
-## 11. Owner page extras (cloud update)
-After redeploying (`cd cloud && npm run deploy`), open the owner page and check: the **Needs attention** strip, yesterday's total with ▲/▼ under today's revenue, tapping a chart bar shows that day, **🙈 Hide profit** masks every profit figure and remembers it after refresh, and the page follows the phone's light/dark setting. Browser menu → "Add to Home Screen" gives a VoltPOS icon.
-
-## 12. Sales with items (3.3.0)
-Needs the 3.3.0 installer in the shop **and** the cloud update deployed (`cd cloud && npm run deploy`). On the owner page open a shop: **Sales: last 7 days** lists every sale from the past week, grouped by day with day totals. Tap a sale to see its items and discount. Search by customer or product. A shop still on an older version shows item counts and a note asking to update the shop app.

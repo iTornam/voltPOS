@@ -86,13 +86,6 @@ function startServer() {
       return;
     }
 
-    // API: remote dashboard (config + sending snapshots to the cloud)
-    if (pathname.startsWith('/api/remote/')) {
-      const action = pathname.replace('/api/remote/', '');
-      if (req.method === 'GET' && action === 'status') { sendJSON(res, remoteStatusPayload()); return; }
-      if (req.method === 'POST') { readJSONBody(req, res, (body) => handleRemote(action, body, res), 300000); return; }
-    }
-
     // API: load data
     if (pathname.startsWith('/api/load/')) {
       const key = pathname.replace('/api/load/', '').replace(/\//g, '');
@@ -202,7 +195,7 @@ function writeJSONAtomic(filePath, data) {
 
 function getSecurity(raw) {
   const s = (raw && raw.security) || {};
-  return { setupComplete: !!s.setupComplete, pins: s.pins || {}, recovery: s.recovery || null, remote: s.remote || null };
+  return { setupComplete: !!s.setupComplete, pins: s.pins || {}, recovery: s.recovery || null };
 }
 
 function updateSecurity(mutator) {
@@ -218,7 +211,6 @@ function authSummary(sec) {
   return {
     setupComplete: sec.setupComplete,
     pins: { cashier: !!sec.pins.cashier, manager: !!sec.pins.manager, owner: !!sec.pins.owner },
-    remote: remoteSummary(sec),
   };
 }
 
@@ -293,9 +285,9 @@ function issueRecoveryCode(sec) {
   return code;
 }
 
-function readJSONBody(req, res, cb, limit = 20000) {
+function readJSONBody(req, res, cb) {
   let body = '';
-  req.on('data', (chunk) => { body += chunk; if (body.length > limit) req.destroy(); });
+  req.on('data', (chunk) => { body += chunk; if (body.length > 20000) req.destroy(); });
   req.on('end', () => {
     try { cb(JSON.parse(body || '{}')); }
     catch (e) { sendJSON(res, { ok: false, error: 'Bad request' }, 400); }
@@ -397,95 +389,6 @@ function handleAuth(action, b, res) {
     }
   } catch (e) {
     console.error('Auth error:', e);
-    sendJSON(res, { ok: false, error: 'Server error' }, 500);
-  }
-}
-
-// ── Remote dashboard: push a small snapshot of the shop's numbers to the owner's cloud page ──
-// Config lives in settings.json -> security.remote (server-side only; the key is never sent to the UI).
-const remoteStatus = { lastOk: null, lastAttempt: null, lastError: null };
-
-function remoteSummary(sec) {
-  const r = sec.remote;
-  return r ? { configured: !!(r.url && r.account && r.shop && r.key), enabled: !!r.enabled, url: r.url || '', account: r.account || '', shop: r.shop || '' }
-           : { configured: false, enabled: false, url: '', account: '', shop: '' };
-}
-function remoteStatusPayload() {
-  let sum;
-  try { sum = remoteSummary(getSecurity(readSettingsRaw())); } catch (e) { sum = remoteSummary({}); }
-  return { ok: true, ...sum, ...remoteStatus };
-}
-function cleanRemoteUrl(u) {
-  try {
-    const x = new URL(String(u || '').trim());
-    const local = x.hostname === 'localhost' || x.hostname === '127.0.0.1';
-    if (x.protocol !== 'https:' && !(local && x.protocol === 'http:')) return null; // internet servers must use https
-    return x.origin;
-  } catch (e) { return null; }
-}
-async function cloudPush(rc, snapshot) {
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 15000);
-  try {
-    const r = await fetch(rc.url + '/api/push', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Account': rc.account, 'X-Shop': rc.shop, 'X-Key': rc.key },
-      body: JSON.stringify(snapshot),
-      signal: ctl.signal,
-    });
-    if (r.ok) return { ok: true };
-    if (r.status === 401) return { ok: false, error: 'The server rejected the account code, shop ID or shop key. Check them in Settings.' };
-    if (r.status === 413) return { ok: false, error: 'The snapshot was too large for the server.' };
-    return { ok: false, error: `The server answered with an error (${r.status}).` };
-  } catch (e) {
-    return { ok: false, offline: true, error: 'Could not reach the server. Are you online?' };
-  } finally { clearTimeout(timer); }
-}
-
-async function handleRemote(action, b, res) {
-  try {
-    const sec = getSecurity(readSettingsRaw());
-    const bad = (msg, code = 400) => sendJSON(res, { ok: false, error: msg }, code);
-
-    if (action === 'config') {
-      // Only the Owner may change this once a PIN is set (same rule as PIN changes).
-      if (sec.setupComplete && sec.pins.owner && sessionRole(b.token) !== 'owner') return bad('Owner login required.', 403);
-      if (b.clear) {
-        const out = updateSecurity((s) => { s.remote = null; });
-        remoteStatus.lastOk = remoteStatus.lastError = remoteStatus.lastAttempt = null;
-        return sendJSON(res, { ok: true, auth: authSummary(out) });
-      }
-      const url = cleanRemoteUrl(b.url);
-      const account = String(b.account || '').trim().toUpperCase();
-      const shop = String(b.shop || '').trim();
-      const key = String(b.key || '').trim();
-      if (!url) return bad('Server address must start with https:// (for example https://voltpos-remote.yourname.workers.dev).');
-      if (!/^[A-Z0-9]{6,16}$/.test(account)) return bad('Account code looks wrong. It is about 10 letters and numbers.');
-      if (!/^[A-Za-z0-9_-]{1,20}$/.test(shop)) return bad('Shop ID looks wrong (for example s1).');
-      if (key && !/^[A-Za-z0-9]{16,64}$/.test(key)) return bad('Shop key looks wrong. It is about 24 letters and numbers.');
-      const existing = sec.remote || {};
-      const finalKey = key || (existing.url === url && existing.account === account && existing.shop === shop ? existing.key : '');
-      if (!finalKey) return bad('Enter the shop key.');
-      const out = updateSecurity((s) => { s.remote = { enabled: !!b.enabled, url, account, shop, key: finalKey }; });
-      remoteStatus.lastError = null;
-      return sendJSON(res, { ok: true, auth: authSummary(out) });
-    }
-
-    if (action === 'push') {
-      const rc = sec.remote;
-      if (!rc || !rc.url || !rc.key) return bad('Remote dashboard is not set up.');
-      if (!rc.enabled && !b.force) return sendJSON(res, { ok: true, skipped: true });
-      if (!b.snapshot || typeof b.snapshot !== 'object' || Array.isArray(b.snapshot)) return bad('No snapshot.');
-      remoteStatus.lastAttempt = Date.now();
-      const r = await cloudPush(rc, b.snapshot);
-      if (r.ok) { remoteStatus.lastOk = Date.now(); remoteStatus.lastError = null; return sendJSON(res, { ok: true, at: remoteStatus.lastOk }); }
-      remoteStatus.lastError = r.error;
-      return sendJSON(res, { ok: false, offline: !!r.offline, error: r.error });
-    }
-
-    return bad('Unknown action.', 404);
-  } catch (e) {
-    console.error('Remote error:', e);
     sendJSON(res, { ok: false, error: 'Server error' }, 500);
   }
 }
@@ -617,19 +520,6 @@ function buildMenu() {
         { label: 'Quit VoltPOS', accelerator: 'Cmd+Q', click: () => app.quit() },
       ]
     }] : []),
-    {
-      // Without an Edit menu, Cmd/Ctrl + C, V, X, A and Z do nothing inside the app (Electron needs these roles).
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'selectAll' },
-      ]
-    },
     {
       label: 'File',
       submenu: [

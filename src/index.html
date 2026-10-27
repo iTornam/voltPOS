@@ -46,7 +46,6 @@ header{display:flex;align-items:center;justify-content:space-between;padding:0 2
 .products-grid{flex:1;overflow-y:auto;padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:10px;align-content:start}
 .product-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px;cursor:pointer;display:flex;flex-direction:column;gap:5px}
 .product-card:hover{border-color:var(--accent);background:var(--surface2)}.product-card:active{transform:scale(.97)}
-.product-card.out{opacity:.5;cursor:not-allowed;border-style:dashed}.product-card.out:hover{border-color:var(--border);background:var(--surface)}.product-card.out:active{transform:none}
 .product-card.selected{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)44}
 .product-name{font-size:12px;font-weight:500;line-height:1.3}
 .product-price{font-family:var(--mono);font-size:13px;color:var(--accent);font-weight:600}
@@ -442,24 +441,6 @@ body.gated>*:not(#wizard-screen):not(#toast):not(script){display:none!important}
         <button class="btn btn-secondary" onclick="regenerateRecovery()">New Recovery Code</button>
       </div>
       <div id="pin-status" style="font-size:12px;color:var(--success);min-height:16px;"></div>
-    </div>
-
-    <div class="settings-section" id="sec-remote">
-      <h3>📡 Remote Dashboard</h3>
-      <p>Lets the owner check this shop's sales, profit and stock from a phone. The shop keeps working offline and sends an update whenever it is online. Only totals, recent sales and stock levels are sent. PINs and phone numbers never leave this computer.</p>
-      <div class="form-row"><label>Server address</label><input class="form-input" id="rm-url" placeholder="https://voltpos-remote.example.workers.dev" autocomplete="off" spellcheck="false"></div>
-      <div class="form-row-2">
-        <div class="form-row"><label>Account code</label><input class="form-input" id="rm-account" autocomplete="off" spellcheck="false" style="text-transform:uppercase"></div>
-        <div class="form-row"><label>Shop ID</label><input class="form-input" id="rm-shop" placeholder="s1" autocomplete="off" spellcheck="false"></div>
-      </div>
-      <div class="form-row"><label>Shop key</label><input class="form-input" type="password" id="rm-key" autocomplete="off"></div>
-      <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;"><input type="checkbox" id="rm-enabled"> Send updates to the remote dashboard</label>
-      <div id="rm-status" style="font-size:12px;color:var(--muted);line-height:1.5;"></div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        <button class="btn btn-primary" onclick="saveRemote()">Save</button>
-        <button class="btn btn-secondary" onclick="sendRemoteNow()">Send update now</button>
-        <button class="btn btn-secondary" onclick="clearRemote()">Remove</button>
-      </div>
     </div>
 
     <div class="settings-section">
@@ -858,7 +839,6 @@ async function save(key,value){
   if(key==='settings'){value=Object.assign({},value);delete value._auth;} // security data lives only on the server
   try{localStorage.setItem(LS[key],JSON.stringify(value));}catch{}
   try{await fetch('/api/save/'+key,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});}catch(e){}
-  if(key===KEY.sales||key===KEY.products||key===KEY.expenses)scheduleRemotePush();
 }
 
 // ═══════════════════════════════════════
@@ -1203,7 +1183,7 @@ function switchTab(tab){
   if(tab==='credits')renderCredits();
   if(tab==='expenses')renderExpenses();
   if(tab==='profit')setProfitRange('month');
-  if(tab==='settings'){loadSettingsUI();loadPINSettingsUI();loadRemoteUI();}
+  if(tab==='settings'){loadSettingsUI();loadPINSettingsUI();}
 }
 document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>switchTab(t.dataset.tab)));
 
@@ -1224,7 +1204,7 @@ const TOUR={
   pos:[
     {sel:'#product-search',title:'Find a product',text:'Type a name or scan/enter a barcode. Press <b>F2</b> from anywhere to jump here.'},
     {sel:'#cat-filter',title:'Categories',text:'Filter the products by category to find items faster.'},
-    {sel:'#products-grid',title:'Tap to add to cart',text:'Tap a product to add it to the cart. Each card shows what\'s left in stock. Sold-out products stay visible but greyed out, and cannot be added until you restock them in Inventory.'},
+    {sel:'#products-grid',title:'Tap to add to cart',text:'Tap a product to add it to the cart. Each card shows what\'s left in stock. Products with zero stock are hidden here.'},
     {sel:'#cart-items',title:'The cart',text:'Items you\'ve added appear here. Use <b>−</b> and <b>+</b> to change quantity, <b>✕</b> to remove an item, or <b>Clear</b> to start over.'},
     {sel:'#discount-input',title:'Discount',text:'Optional. Enter an amount to take off the total. It can\'t be more than the subtotal.'},
     {sel:'#payment-method',title:'Payment method',text:'Cash, MoMo, Card or Cheque. Choose <b>Credit</b> when the customer will pay later. The sale then goes to Credit Sales until it\'s paid.'},
@@ -1269,7 +1249,6 @@ const TOUR={
     {sel:'#s-shopname',up:2,title:'Shop details',text:'Your shop name, address line, currency, VAT % and the footer message. These print on every receipt.'},
     {sel:'#pin-settings-rows',up:1,title:'PIN lock & roles',text:'<b>Cashier</b>: till only. <b>Manager</b>: + inventory, customers, sales, credits. <b>Owner</b>: everything. Set the Owner PIN first. If it\'s ever forgotten, use <b>Forgot Owner PIN?</b> on the lock screen with your recovery code.'},
     {sel:'#view-settings [onclick="regenerateRecovery()"]',title:'Recovery code',text:'Lost your recovery code? Make a new one here (the old one stops working). Keep it somewhere private. It\'s your only way back in if you forget the Owner PIN.'},
-    {sel:'#sec-remote',title:'Remote dashboard',text:'Optional. Connect this shop to the owner\'s online page so sales, profit and stock can be checked from a phone. The shop still works fully offline and sends updates whenever it is online.'},
     {sel:'#restore-file',up:2,title:'Backup & restore',text:'<b>Backup</b> saves all your data to one file. Do it regularly and keep a copy off this computer (a flash drive or email). <b>Restore</b> loads a backup. <b>Clear All Data</b> erases everything. Be careful.'},
   ],
 };
@@ -1539,116 +1518,6 @@ async function deleteCategory(name,moveTo){
 }
 
 // ═══════════════════════════════════════
-// REMOTE DASHBOARD (optional): sends a small snapshot of this shop's numbers to the owner's cloud page
-// ═══════════════════════════════════════
-let rmTimer=null,rmBusy=false,rmStarted=false;
-function remoteCfg(){return(settings._auth&&settings._auth.remote)||{configured:false,enabled:false,url:'',account:'',shop:''};}
-function remoteOn(){return !!remoteCfg().enabled;}
-async function remoteAPI(path,body){
-  try{
-    const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
-    return await r.json();
-  }catch(e){return{ok:false,error:'Could not reach the VoltPOS server.'};}
-}
-// Same formulas as the Dashboard / Profit pages, so the numbers match what the shop sees.
-function buildRemoteSnapshot(){
-  const DAY=86400000,now=Date.now(),isoDay=ms=>new Date(ms).toISOString().split('T')[0],today=isoDay(now);
-  const r2=n=>Math.round((Number(n)||0)*100)/100;
-  const refundsOf=x=>(x.amendments||[]).reduce((r,a)=>r+(a.refund||0),0);
-  const salesIn=(from,to)=>sales.filter(s=>{const d=String(s.date).slice(0,10);return d>=from&&d<=to;});
-  const agg=(from,to)=>{
-    const ss=salesIn(from,to);
-    const exp=expenses.filter(e=>e.date>=from&&e.date<=to).reduce((a,x)=>a+x.amount,0);
-    const revenue=ss.reduce((a,x)=>a+x.total,0),cogs=ss.reduce((a,x)=>a+saleCOGS(x),0),refunds=ss.reduce((a,x)=>a+refundsOf(x),0);
-    return{revenue:r2(revenue),expenses:r2(exp),refunds:r2(refunds),profit:r2(revenue-cogs-refunds-exp),sales:ss.length,
-      cash:r2(ss.filter(s=>s.payment==='Cash').reduce((a,x)=>a+x.total,0)),
-      digital:r2(ss.filter(s=>s.payment!=='Cash'&&s.payment!=='Credit').reduce((a,x)=>a+x.total,0))};
-  };
-  const from7=isoDay(now-6*DAY),from30=isoDay(now-29*DAY);
-  const days=[];for(let i=13;i>=0;i--){const d=isoDay(now-i*DAY),a=agg(d,d);days.push({d,revenue:a.revenue,profit:a.profit});}
-  const unpaid=sales.filter(s=>s.payment==='Credit'&&!s.creditPaid);
-  const owed={};unpaid.forEach(s=>{const k=s.customer||'Walk-in';(owed[k]=owed[k]||{name:k,amount:0,count:0});owed[k].amount+=s.total;owed[k].count++;});
-  const low=products.filter(p=>p.stock<=p.low).sort((a,b)=>a.stock-b.stock);
-  const top={};salesIn(from30,today).forEach(s=>s.items.forEach(i=>{const t=(top[i.name]=top[i.name]||{name:i.name,qty:0,revenue:0});t.qty+=i.qty;t.revenue+=i.price*i.qty;}));
-  const byDateDesc=(a,b)=>String(b.date).localeCompare(String(a.date));
-  const week=salesIn(from7,today).sort(byDateDesc); // every sale from the last 7 days (newest first)
-  return{
-    v:1,shopName:settings.shopName||'',currency:settings.currency||'GH₵',generatedAt:new Date().toISOString(),productCount:products.length,
-    today:Object.assign({date:today},agg(today,today)),d7:agg(from7,today),d30:agg(from30,today),
-    outstandingCredit:r2(unpaid.reduce((a,x)=>a+x.total,0)),
-    creditCustomers:Object.values(owed).map(o=>({name:o.name,amount:r2(o.amount),count:o.count})).sort((a,b)=>b.amount-a.amount).slice(0,12),
-    days,
-    lowStock:low.slice(0,25).map(p=>({name:p.name,stock:p.stock,low:p.low})),lowCount:low.length,outCount:products.filter(p=>p.stock<=0).length,
-    // all sales of the last 7 days, with what was sold (capped so one update stays small)
-    recentSales:week.slice(0,400).map(s=>({id:s.id,date:s.date,customer:s.customer||'Walk-in',total:r2(s.total),discount:r2(s.discount),payment:s.payment,unpaid:s.payment==='Credit'&&!s.creditPaid,
-      items:s.items.slice(0,12).map(i=>({n:String(i.name).slice(0,40),q:i.qty,p:r2(i.price)})),more:Math.max(0,s.items.length-12)})),
-    salesCount7:week.length,
-    topProducts:Object.values(top).sort((a,b)=>b.qty-a.qty).slice(0,8).map(t=>({name:t.name,qty:t.qty,revenue:r2(t.revenue)})),
-    recentExpenses:[...expenses].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,10).map(e=>({date:e.date,cat:e.cat,desc:e.desc,amount:r2(e.amount)})),
-  };
-}
-function scheduleRemotePush(){
-  if(!remoteOn())return;
-  clearTimeout(rmTimer);rmTimer=setTimeout(()=>pushRemote(false),30000); // wait for a burst of changes to finish
-}
-async function pushRemote(force){
-  if(rmBusy)return{ok:false,error:'Still sending the last update.'};
-  if(!force&&!remoteOn())return{ok:true,skipped:true};
-  rmBusy=true;
-  try{
-    const j=await remoteAPI('/api/remote/push',{snapshot:buildRemoteSnapshot(),force:!!force});
-    refreshRemoteStatus();return j;
-  }finally{rmBusy=false;}
-}
-function startRemoteSync(){
-  if(rmStarted)return;rmStarted=true;
-  setTimeout(()=>pushRemote(false),5000);                 // shortly after the app opens
-  setInterval(()=>pushRemote(false),20*60*1000);          // heartbeat every 20 minutes (also retries after being offline)
-  window.addEventListener('online',()=>scheduleRemotePush());
-}
-async function refreshRemoteStatus(){
-  const el=document.getElementById('rm-status');if(!el)return;
-  try{
-    const s=await(await fetch('/api/remote/status')).json();
-    if(!s.configured)el.textContent='Not set up yet. Fill in the details you were given, then press Save.';
-    else if(s.lastError)el.textContent='⚠ '+s.lastError+(s.lastOk?' (last successful update '+new Date(s.lastOk).toLocaleTimeString('en-GH',{hour:'2-digit',minute:'2-digit'})+')':'');
-    else if(s.lastOk)el.textContent='✓ Last update sent at '+new Date(s.lastOk).toLocaleTimeString('en-GH',{hour:'2-digit',minute:'2-digit'})+(s.enabled?'. Updates are sent automatically.':'. Switched off.');
-    else el.textContent=s.enabled?'Switched on. The first update will be sent shortly.':'Saved, but switched off.';
-  }catch(e){el.textContent='';}
-}
-function loadRemoteUI(){
-  const c=remoteCfg();
-  document.getElementById('rm-url').value=c.url||'';
-  document.getElementById('rm-account').value=c.account||'';
-  document.getElementById('rm-shop').value=c.shop||'';
-  document.getElementById('rm-key').value='';
-  document.getElementById('rm-key').placeholder=c.configured?'Saved. Leave blank to keep it':'Shop key';
-  document.getElementById('rm-enabled').checked=!!c.enabled;
-  refreshRemoteStatus();
-}
-async function saveRemote(){
-  const r=await remoteAPI('/api/remote/config',{token:authToken,enabled:document.getElementById('rm-enabled').checked,
-    url:document.getElementById('rm-url').value,account:document.getElementById('rm-account').value,shop:document.getElementById('rm-shop').value,key:document.getElementById('rm-key').value});
-  if(!r.ok){toast(r.error||'Could not save.');return;}
-  applyAuth(r.auth);loadRemoteUI();
-  if(r.auth.remote.enabled){
-    const p=await pushRemote(true);
-    toast(p.ok?'Saved and sent. Check the dashboard page.':(p.error||'Saved, but could not send yet.'));
-  }else toast('Saved.');
-}
-async function sendRemoteNow(){
-  if(!remoteCfg().configured){toast('Save the details first.');return;}
-  const p=await pushRemote(true);
-  toast(p.ok?'Update sent.':(p.error||'Could not send.'));
-}
-async function clearRemote(){
-  if(!confirm('Remove the remote dashboard connection from this computer? The page will stop updating.'))return;
-  const r=await remoteAPI('/api/remote/config',{token:authToken,clear:true});
-  if(!r.ok){toast(r.error||'Could not remove.');return;}
-  applyAuth(r.auth);loadRemoteUI();toast('Remote dashboard removed.');
-}
-
-// ═══════════════════════════════════════
 // KEYBOARD SHORTCUTS
 // ═══════════════════════════════════════
 document.addEventListener('keydown',e=>{
@@ -1668,12 +1537,12 @@ document.addEventListener('keydown',e=>{
     if(list.length>0)addToCart(list[0].id);
   }
 });
-function filteredProducts(includeOut){
+function filteredProducts(){
   const q=document.getElementById('product-search').value.toLowerCase();
-  let list=includeOut?products.slice():products.filter(p=>p.stock>0); // default (Enter-to-add) never picks a sold-out item
+  let list=products.filter(p=>p.stock>0);
   if(activeCategory!=='All')list=list.filter(p=>p.cat===activeCategory);
   if(q)list=list.filter(p=>p.name.toLowerCase().includes(q)||(p.barcode||'').includes(q));
-  return list.sort((a,b)=>((b.stock>0)-(a.stock>0))||a.name.localeCompare(b.name)); // in stock first, then A-Z
+  return list.sort((a,b)=>a.name.localeCompare(b.name));
 }
 
 // ═══════════════════════════════════════
@@ -1711,9 +1580,9 @@ function buildCatFilter(){
 }
 function setCategory(c){activeCategory=c;buildCatFilter();renderProductGrid();}
 function renderProductGrid(){
-  const list=filteredProducts(true);
+  const list=filteredProducts();
   const grid=document.getElementById('products-grid');
-  if(!products.length&&!document.getElementById('product-search').value&&activeCategory==='All'){
+  if(!list.length&&!document.getElementById('product-search').value&&activeCategory==='All'){
     grid.innerHTML=`<div style="grid-column:1/-1;text-align:center;padding:40px 20px;display:flex;flex-direction:column;align-items:center;gap:14px;">
       <div style="font-size:13px;font-weight:600;">No products yet</div>
       <div style="font-size:13px;color:var(--muted);max-width:280px;line-height:1.6;">Go to <strong style="color:var(--text)">Inventory</strong> to add your first product.</div>
@@ -1721,12 +1590,7 @@ function renderProductGrid(){
     </div>`;return;
   }
   if(!list.length){grid.innerHTML=`<div class="no-results">No products found.</div>`;return;}
-  grid.innerHTML=list.map(p=>p.stock<=0?`
-    <div class="product-card out" title="Out of stock. Restock it in Inventory to sell it.">
-      <div class="product-name">${esc(p.name)}</div>
-      <div class="product-price">${fmt(p.price)}</div>
-      <div class="product-stock low">OUT OF STOCK</div>
-    </div>`:`
+  grid.innerHTML=list.map(p=>`
     <div class="product-card" onclick="addToCart('${p.id}')">
       <div class="product-name">${esc(p.name)}</div>
       <div class="product-price">${fmt(p.price)}</div>
@@ -1982,7 +1846,7 @@ async function saveProduct(){
   await save(KEY.products,products);
   renderInventory();buildCatFilter();renderProductGrid();
   closeModal('modal-product');
-  toast(editingId?'Product updated.':(stock===0?'Product added with 0 stock. Restock it in Inventory to sell it.':'Product added.'));
+  toast(editingId?'Product updated.':'Product added.');
 }
 async function deleteProduct(id){
   if(!confirm('Delete this product?'))return;
@@ -2686,7 +2550,6 @@ async function loadAppData(){
   const[p,s,c,e,sl]=await Promise.all([load(KEY.products),load(KEY.sales),load(KEY.customers),load(KEY.expenses),load(KEY.stocklog)]);
   products=p||[];sales=s||[];customers=c||[];expenses=e||[];stocklog=sl||[];
   buildCatFilter();renderProductGrid();renderDashboard();
-  startRemoteSync();
 }
 
 async function init(){
