@@ -66,3 +66,11 @@ After redeploying (`cd cloud && npm run deploy`), open the owner page and check:
 
 ## 12. Sales with items (3.3.0)
 Needs the 3.3.0 installer in the shop **and** the cloud update deployed (`cd cloud && npm run deploy`). On the owner page open a shop: **Sales: last 7 days** lists every sale from the past week, grouped by day with day totals. Tap a sale to see its items and discount. Search by customer or product. A shop still on an older version shows item counts and a note asking to update the shop app.
+
+## 13. Stock transfers between shops (3.4.0)
+Inventory → **🔁 Transfer**.
+* **Send stock out** (at the sending shop): shop name, items and quantities (only in-stock products are offered; more than the stock is refused). Stock goes down, Stock History shows "Transfer Out", and **🖨 Print slip** prints a slip with signature lines.
+* **Receive stock in** (at the receiving shop): shop it came from, items and quantities. Stock goes up. Choose **＋ New product** for an item the shop doesn't have yet. Cost price: leave blank to keep the current cost, enter a value to replace it (same rule as Restock).
+* **History** lists every slip (newest first) and can reprint any of them.
+* The two shops are **not linked**: each records its own side. Tip: write the sender's slip number (for example TRF-OUT-0007) in the receiver's Note.
+* To correct a mistake, use Edit on the product (logged as "Manual Edit").

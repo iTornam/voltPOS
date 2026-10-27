@@ -285,6 +285,7 @@ body.gated>*:not(#wizard-screen):not(#toast):not(script){display:none!important}
     <input class="search-box" style="max-width:280px;" type="text" id="inv-search" placeholder="Search products…" oninput="renderInventory()">
     <button class="btn btn-primary" onclick="openAddProduct()">+ Add Product</button>
     <button class="btn btn-secondary" onclick="openCategories()">🏷 Categories</button>
+    <button class="btn btn-secondary" onclick="openTransfer()">🔁 Transfer</button>
     <button class="help-btn" onclick="showHelp('inventory')">?</button>
     <button class="btn btn-secondary" style="margin-left:auto;" onclick="exportInventoryCSV()">⬇ Export</button>
   </div>
@@ -597,6 +598,32 @@ body.gated>*:not(#wizard-screen):not(#toast):not(script){display:none!important}
 </div>
 
 <!-- MODALS -->
+<!-- Stock transfer between shops -->
+<div class="modal-bg" id="modal-transfer">
+  <div class="modal" style="max-width:600px;">
+    <h3>🔁 Stock Transfer</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" id="tr-tab-out" type="button" onclick="setTransferMode('out')">Send stock out</button>
+      <button class="btn btn-secondary" id="tr-tab-in" type="button" onclick="setTransferMode('in')">Receive stock in</button>
+      <button class="btn btn-secondary" id="tr-tab-history" type="button" onclick="setTransferMode('history')">History</button>
+    </div>
+    <div id="tr-form" style="display:flex;flex-direction:column;gap:10px;">
+      <div style="font-size:12px;color:var(--muted);line-height:1.6;">Use <b>Send stock out</b> at the shop that sends the goods and <b>Receive stock in</b> at the shop that gets them. Each shop records its own side. A slip is printed for signing.</div>
+      <div class="form-row-2">
+        <div class="form-row"><label id="tr-shop-label">Send to (shop name) *</label><input class="form-input" id="tr-shop" list="tr-shop-list" maxlength="60" autocomplete="off"><datalist id="tr-shop-list"></datalist></div>
+        <div class="form-row"><label>Note (optional)</label><input class="form-input" id="tr-note" maxlength="80" autocomplete="off" placeholder="e.g. delivered by driver"></div>
+      </div>
+      <div id="tr-lines" style="display:flex;flex-direction:column;gap:8px;max-height:42vh;overflow-y:auto;"></div>
+      <button class="btn btn-secondary" type="button" style="align-self:flex-start" onclick="addTransferLine()">+ Add item</button>
+      <div style="display:flex;gap:8px;justify-content:flex-end;"><button class="btn btn-secondary" type="button" onclick="closeModal('modal-transfer')">Cancel</button><button class="btn btn-primary" type="button" onclick="confirmTransfer()">Confirm transfer</button></div>
+    </div>
+    <div id="tr-done" style="display:none;flex-direction:column;gap:12px;">
+      <div id="tr-done-text" style="font-size:14px;line-height:1.6;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;"><button class="btn btn-secondary" type="button" onclick="closeModal('modal-transfer')">Close</button><button class="btn btn-secondary" type="button" onclick="setTransferMode(trMode)">New transfer</button><button class="btn btn-primary" type="button" onclick="printTransferSlip(trLast)">🖨 Print slip</button></div>
+    </div>
+    <div id="tr-history" style="display:none;flex-direction:column;gap:8px;max-height:55vh;overflow-y:auto;"></div>
+  </div>
+</div>
 <!-- Manage categories -->
 <div class="modal-bg" id="modal-categories">
   <div class="modal" style="max-width:520px;">
@@ -1235,6 +1262,7 @@ const TOUR={
     {sel:'#inv-search',title:'Search your stock',text:'Find a product by name, category or barcode.'},
     {sel:'#view-inventory [onclick="openAddProduct()"]',title:'Add a product',text:'Enter the selling price, <b>cost price</b>, stock quantity and a low-stock level. The cost price is what makes your profit figures accurate.'},
     {sel:'#view-inventory [onclick="openCategories()"]',title:'Your categories',text:'Create, rename or delete your own categories. Renaming updates all its products. Deleting asks where to move them. You can also add one on the spot with <b>＋ New</b> in the product form.'},
+    {sel:'#view-inventory [onclick="openTransfer()"]',title:'Transfer stock between shops',text:'Moving goods to or from another shop? Use <b>Send stock out</b> at the sending shop and <b>Receive stock in</b> at the other. Each records the change in stock history, and you can print a slip for both sides to sign.'},
     {sel:'#view-inventory .table-wrap',title:'Your stock list',text:'Each row has <b>Edit</b>, <b>Restock</b> (add new stock and log it), <b>History</b> (every stock change, ever) and <b>Delete</b>.'},
     {sel:'#view-inventory [onclick="exportInventoryCSV()"]',title:'Export',text:'Download your stock list as a spreadsheet (CSV).'},
   ],
@@ -1649,6 +1677,145 @@ async function clearRemote(){
 }
 
 // ═══════════════════════════════════════
+// STOCK TRANSFERS between shops. Each shop records its own side; a slip is printed for signing.
+// (The two shops' apps are not linked: the sending shop uses "Send stock out", the other uses "Receive stock in".)
+// ═══════════════════════════════════════
+let trMode='out',trLines=[],trLast=null;
+function trShopNames(){return[...new Set(stocklog.filter(l=>l.shop).map(l=>l.shop))];}
+function trClean(v,max){return String(v||'').replace(/\s+/g,' ').trim().slice(0,max);}
+function trNextSlip(type){ // TRF-OUT-0001, TRF-IN-0001 ...
+  const n=new Set(stocklog.filter(l=>l.type===type&&l.slip).map(l=>l.slip)).size+1;
+  return(type==='transfer-out'?'TRF-OUT-':'TRF-IN-')+String(n).padStart(4,'0');
+}
+function openTransfer(){
+  const dl=document.getElementById('tr-shop-list');dl.innerHTML='';
+  trShopNames().forEach(n=>{const o=document.createElement('option');o.value=n;dl.appendChild(o);});
+  setTransferMode('out');
+  document.getElementById('modal-transfer').classList.add('open');
+}
+function setTransferMode(m){
+  trMode=m;
+  ['out','in','history'].forEach(k=>{const b=document.getElementById('tr-tab-'+k);b.classList.toggle('btn-primary',k===m);b.classList.toggle('btn-secondary',k!==m);});
+  document.getElementById('tr-done').style.display='none';
+  document.getElementById('tr-form').style.display=m==='history'?'none':'flex';
+  document.getElementById('tr-history').style.display=m==='history'?'flex':'none';
+  if(m==='history'){renderTransferHistory();return;}
+  document.getElementById('tr-shop-label').textContent=m==='out'?'Send to (shop name) *':'Received from (shop name) *';
+  document.getElementById('tr-shop').value='';document.getElementById('tr-note').value='';
+  trLines=[{pid:'',qty:'',cost:'',name:'',price:''}];
+  renderTransferLines();
+}
+function addTransferLine(){trLines.push({pid:'',qty:'',cost:'',name:'',price:''});renderTransferLines();}
+function removeTransferLine(i){trLines.splice(i,1);if(!trLines.length)trLines.push({pid:'',qty:'',cost:'',name:'',price:''});renderTransferLines();}
+function renderTransferLines(){
+  const box=document.getElementById('tr-lines');box.innerHTML='';
+  const mk=(tag,props)=>Object.assign(document.createElement(tag),props||{});
+  const sorted=[...products].sort((a,b)=>a.name.localeCompare(b.name));
+  trLines.forEach((ln,i)=>{
+    const wrap=mk('div');wrap.style.cssText='display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;';
+    const row=mk('div');row.style.cssText='display:flex;gap:6px;align-items:center;';
+    const sel=mk('select',{className:'form-input'});sel.style.cssText='flex:1;min-width:0;';
+    sel.appendChild(mk('option',{value:'',textContent:'Choose a product…'}));
+    sorted.forEach(p=>{if(trMode==='out'&&p.stock<=0)return;sel.appendChild(mk('option',{value:p.id,textContent:p.name+(trMode==='out'?'  ('+p.stock+' in stock)':'')}));});
+    if(trMode==='in')sel.appendChild(mk('option',{value:'__new',textContent:'＋ New product (not in this shop yet)…'}));
+    sel.value=ln.pid;sel.onchange=()=>{ln.pid=sel.value;renderTransferLines();};
+    const qty=mk('input',{className:'form-input',type:'number',min:1,step:1,placeholder:'Qty',value:ln.qty});qty.style.cssText='width:84px;';qty.oninput=()=>{ln.qty=qty.value;};
+    const del=mk('button',{className:'act-btn',type:'button',textContent:'✕'});del.style.margin='0';del.onclick=()=>removeTransferLine(i);
+    row.append(sel,qty,del);wrap.appendChild(row);
+    if(trMode==='in'){
+      const r2=mk('div');r2.style.cssText='display:flex;gap:6px;flex-wrap:wrap;';
+      if(ln.pid==='__new'){
+        const nm=mk('input',{className:'form-input',type:'text',maxLength:80,placeholder:'New product name *',value:ln.name});nm.style.cssText='flex:2;min-width:140px;';nm.oninput=()=>{ln.name=nm.value;};
+        const pr=mk('input',{className:'form-input',type:'number',min:0,step:'any',placeholder:'Selling price *',value:ln.price});pr.style.cssText='flex:1;min-width:100px;';pr.oninput=()=>{ln.price=pr.value;};
+        r2.append(nm,pr);
+      }
+      const co=mk('input',{className:'form-input',type:'number',min:0,step:'any',placeholder:ln.pid==='__new'?'Cost price (optional)':'Cost price (optional, blank = keep current)',value:ln.cost});co.style.cssText='flex:1;min-width:140px;';co.oninput=()=>{ln.cost=co.value;};
+      r2.appendChild(co);wrap.appendChild(r2);
+    }
+    box.appendChild(wrap);
+  });
+}
+async function confirmTransfer(){
+  const out=trMode==='out';
+  const shop=trClean(document.getElementById('tr-shop').value,60),note=trClean(document.getElementById('tr-note').value,80);
+  if(!shop){toast(out?'Enter the shop you are sending to.':'Enter the shop it came from.');return;}
+  if(shop.toLowerCase()===trClean(settings.shopName,60).toLowerCase()){toast("That is this shop. Enter the OTHER shop's name.");return;}
+  const wanted=new Map();
+  for(const ln of trLines){
+    if(!ln.pid&&!String(ln.qty).trim())continue; // empty row
+    const q=parseInt(ln.qty,10);
+    if(!ln.pid){toast('Choose a product for each row.');return;}
+    if(!q||q<=0){toast('Enter a quantity for each product.');return;}
+    if(ln.pid==='__new'){
+      const nm=trClean(ln.name,80),pr=parseFloat(ln.price);
+      if(!nm){toast('Enter the name of the new product.');return;}
+      if(isNaN(pr)||pr<0){toast('Enter the selling price of "'+nm+'".');return;}
+      const ex=products.find(p=>p.name.toLowerCase()===nm.toLowerCase());
+      const key=ex?ex.id:'new:'+nm.toLowerCase();
+      const w=wanted.get(key)||{pid:ex?ex.id:null,newName:nm,price:pr,qty:0,cost:parseFloat(ln.cost)};
+      w.qty+=q;wanted.set(key,w);
+    }else{
+      const w=wanted.get(ln.pid)||{pid:ln.pid,qty:0,cost:parseFloat(ln.cost)};
+      w.qty+=q;wanted.set(ln.pid,w);
+    }
+  }
+  if(!wanted.size){toast('Add at least one item.');return;}
+  if(out)for(const w of wanted.values()){const p=products.find(x=>x.id===w.pid);if(!p||w.qty>p.stock){toast('Only '+(p?p.stock:0)+' of "'+(p?p.name:'that product')+'" in stock.');return;}}
+  const type=out?'transfer-out':'transfer-in',slip=trNextSlip(type),now=new Date().toISOString(),by=currentRole||'owner',lines=[];
+  for(const w of wanted.values()){
+    let p=w.pid?products.find(x=>x.id===w.pid):null;
+    if(!p){const cats=getCategories();p={id:uid(),name:w.newName,cat:cats.includes('General')?'General':cats[0],price:w.price,cost:isNaN(w.cost)?0:w.cost,stock:0,low:5,barcode:''};products.push(p);}
+    else if(!out&&!isNaN(w.cost)&&w.cost>0)p.cost=w.cost; // same rule as Restock: blank keeps the current cost
+    p.stock+=out?-w.qty:w.qty;
+    stocklog.unshift({date:now,productId:p.id,productName:p.name,type,change:out?-w.qty:w.qty,stock:p.stock,ref:slip+' · '+(out?'to ':'from ')+shop,by,slip,shop,note});
+    lines.push({name:p.name,qty:w.qty});
+  }
+  await save(KEY.products,products);await save(KEY.stocklog,stocklog);
+  trLast={slip,type,date:now,shop,note,by,lines};
+  renderInventory();renderProductGrid();buildCatFilter();
+  const units=lines.reduce((a,l)=>a+l.qty,0);
+  document.getElementById('tr-done-text').textContent='✓ '+slip+' recorded: '+lines.length+(lines.length===1?' item':' items')+', '+units+(units===1?' unit':' units')+(out?' sent to ':' received from ')+shop+'.';
+  document.getElementById('tr-form').style.display='none';document.getElementById('tr-done').style.display='flex';
+}
+function buildSlipHTML(g){
+  const out=g.type==='transfer-out',me=esc(settings.shopName||'This shop'),other=esc(g.shop);
+  const d=new Date(g.date),when=d.toLocaleDateString('en-GH',{day:'numeric',month:'short',year:'numeric'})+' '+d.toLocaleTimeString('en-GH',{hour:'2-digit',minute:'2-digit'});
+  const units=g.lines.reduce((a,l)=>a+l.qty,0);
+  return `<div class="slip"><h1>STOCK TRANSFER SLIP</h1>
+    <div class="meta"><div><b>Slip no:</b> ${esc(g.slip)}</div><div><b>Date:</b> ${esc(when)}</div><div><b>From:</b> ${out?me:other}</div><div><b>To:</b> ${out?other:me}</div></div>
+    <div class="kind">${out?'Record of stock sent from this shop':'Record of stock received at this shop'}</div>
+    <table><tr><th>#</th><th>Item</th><th class="r">Qty</th></tr>${g.lines.map((l,i)=>`<tr><td>${i+1}</td><td>${esc(l.name)}</td><td class="r">${l.qty}</td></tr>`).join('')}<tr class="tot"><td></td><td>Total units</td><td class="r">${units}</td></tr></table>
+    ${g.note?`<div class="note"><b>Note:</b> ${esc(g.note)}</div>`:''}
+    <div class="sig"><div>Sent by: ______________________________</div><div>Received by: ______________________________</div><div>Date received: ____________________</div></div></div>`;
+}
+function printTransferSlip(g){if(g)printHTML(buildSlipHTML(g));}
+function transferGroups(){
+  const m=new Map();
+  stocklog.filter(l=>l.type==='transfer-out'||l.type==='transfer-in').forEach(l=>{
+    const k=l.type+'|'+l.slip;
+    if(!m.has(k))m.set(k,{slip:l.slip,type:l.type,date:l.date,shop:l.shop,note:l.note||'',by:l.by,lines:[]});
+    m.get(k).lines.push({name:l.productName,qty:Math.abs(l.change)});
+  });
+  return[...m.values()].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+}
+function renderTransferHistory(){
+  const box=document.getElementById('tr-history');box.innerHTML='';
+  const groups=transferGroups();
+  if(!groups.length){const e=document.createElement('div');e.textContent='No transfers yet.';e.style.cssText='color:var(--muted);font-size:13px;text-align:center;padding:20px;';box.appendChild(e);return;}
+  groups.forEach(g=>{
+    const out=g.type==='transfer-out',units=g.lines.reduce((a,l)=>a+l.qty,0),d=new Date(g.date);
+    const row=document.createElement('div');row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;';
+    const left=document.createElement('div');
+    const t=document.createElement('div');t.style.fontWeight='500';t.textContent=g.slip+'  '+(out?'→ ':'← ')+g.shop;
+    const s=document.createElement('div');s.style.cssText='font-size:11px;color:var(--muted);';
+    s.textContent=d.toLocaleDateString('en-GH')+' '+d.toLocaleTimeString('en-GH',{hour:'2-digit',minute:'2-digit'})+' · '+g.lines.length+(g.lines.length===1?' item':' items')+' · '+units+' units'+(g.note?' · '+g.note:'');
+    left.append(t,s);
+    const b=document.createElement('button');b.className='act-btn';b.type='button';b.textContent='🖨 Print slip';b.style.margin='0';b.onclick=()=>printTransferSlip(g);
+    row.append(left,b);box.appendChild(row);
+  });
+}
+
+// ═══════════════════════════════════════
 // KEYBOARD SHORTCUTS
 // ═══════════════════════════════════════
 document.addEventListener('keydown',e=>{
@@ -1878,9 +2045,9 @@ let _printing=false;
 function printReceipt(){doPrint('printable-receipt');}
 function printSaleDetail(){doPrint('printable-sale-detail');}
 function printEOD(){doPrint('printable-eod');}
-function doPrint(id){
+function doPrint(id){const el=document.getElementById(id);if(el)printHTML(el.outerHTML);}
+function printHTML(html){
   if(_printing)return;_printing=true;setTimeout(()=>_printing=false,2000);
-  const el=document.getElementById(id);if(!el){_printing=false;return;}
   // Print from a hidden frame inside the app. (window.open pop-ups are blocked in the desktop app,
   // which is why receipts used to show "Allow popups for printing".)
   const old=document.getElementById('print-frame');if(old)old.remove();
@@ -1893,9 +2060,10 @@ function doPrint(id){
     +'.receipt{width:280px;margin:auto;font-size:12px;line-height:1.9}.receipt-line{display:flex;justify-content:space-between;margin:2px 0}'
     +'.receipt-title{font-size:15px;font-weight:bold;text-align:center}.receipt-sub{text-align:center;color:#666;font-size:10px;margin-bottom:8px}'
     +'.receipt-divider{border:none;border-top:1px dashed #bbb;margin:6px 0}.receipt-total{font-weight:bold;font-size:13px}'
-    +'.receipt-footer{text-align:center;color:#999;font-size:10px;margin-top:8px}';
+    +'.receipt-footer{text-align:center;color:#999;font-size:10px;margin-top:8px}'
+    +'.slip{max-width:640px;margin:0 auto;font-family:Arial,sans-serif;font-size:13px;color:#000}.slip h1{font-size:18px;text-align:center;margin:0 0 12px}.slip .meta{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;margin-bottom:8px}.slip .kind{font-size:11px;color:#555;margin-bottom:8px}.slip table{width:100%;border-collapse:collapse}.slip th,.slip td{border:1px solid #999;padding:6px 8px;text-align:left}.slip .r{text-align:right}.slip .tot td{font-weight:bold}.slip .note{margin-top:10px}.slip .sig{margin-top:40px;display:grid;gap:24px}';
   const d=f.contentWindow.document;
-  d.open();d.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>VoltPOS</title><style>'+css+'</style></head><body>'+el.outerHTML+'</body></html>');d.close();
+  d.open();d.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>VoltPOS</title><style>'+css+'</style></head><body>'+html+'</body></html>');d.close();
   setTimeout(()=>{
     try{f.contentWindow.focus();f.contentWindow.print();}
     catch(e){toast('Could not open the print dialog.');_printing=false;}
@@ -2028,7 +2196,7 @@ function viewStockHistory(id){
   document.getElementById('stock-history-content').innerHTML=log.length?log.map(l=>{
     const d=new Date(l.date);
     const color=l.change>0?'var(--success)':'var(--danger)';
-    const typeLabel={sale:'Sale',restock:'Restock',initial:'Initial Stock',edit:'Manual Edit'}[l.type]||l.type;
+    const typeLabel={sale:'Sale',restock:'Restock',initial:'Initial Stock',edit:'Manual Edit','transfer-out':'Transfer Out','transfer-in':'Transfer In'}[l.type]||l.type;
     return `<div style="display:flex;justify-content:space-between;padding:8px 10px;background:var(--surface2);border-radius:6px;font-size:13px;">
       <div>
         <div style="font-weight:500;">${typeLabel}</div>
