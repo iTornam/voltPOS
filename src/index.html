@@ -507,6 +507,7 @@ body.gated>*:not(#wizard-screen):not(#toast):not(script){display:none!important}
     <button class="pin-key" onclick="pinBack()" style="font-size:14px;">←</button>
     <button class="pin-key" onclick="pinPress(0)">0</button>
     <button class="pin-key" onclick="pinCancel()" style="font-size:11px;color:var(--muted);">Back</button>
+    <div id="pin-hint" style="grid-column:1 / -1;text-align:center;font-size:11px;color:var(--muted);margin-top:4px;">You can also type your PIN on the keyboard.</div>
   </div>
 </div>
 
@@ -1032,6 +1033,18 @@ function pinPress(k){
   }
 }
 function pinBack(){pinEntry=pinEntry.slice(0,-1);renderPINDots();}
+// Type the PIN on the keyboard (top row or number pad). Backspace deletes a digit, Esc goes back to the role list.
+document.addEventListener('keydown',e=>{
+  if(document.getElementById('pin-screen').style.display!=='flex'||!pinTargetRole)return;
+  const t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'))return; // the "Forgot PIN" boxes keep working normally
+  if(e.ctrlKey||e.metaKey||e.altKey)return;
+  let d=null;
+  if(/^[0-9]$/.test(e.key))d=e.key;
+  else{const m=/^Numpad([0-9])$/.exec(e.code||'');if(m)d=m[1];} // number pad, whether or not NumLock is on
+  if(d!==null){e.preventDefault();if(!e.repeat)pinPress(d);}
+  else if(e.key==='Backspace'){e.preventDefault();pinBack();}
+  else if(e.key==='Escape'){e.preventDefault();pinCancel();}
+});
 
 // ─── PIN SETTINGS ───
 function loadPINSettingsUI(){
@@ -1702,34 +1715,98 @@ function setTransferMode(m){
   if(m==='history'){renderTransferHistory();return;}
   document.getElementById('tr-shop-label').textContent=m==='out'?'Send to (shop name) *':'Received from (shop name) *';
   document.getElementById('tr-shop').value='';document.getElementById('tr-note').value='';
-  trLines=[{pid:'',qty:'',cost:'',name:'',price:''}];
+  trLines=[{pid:'',qty:'',cost:'',name:'',price:'',text:''}];
+  document.getElementById('tr-lines').onscroll=trClosePop;
   renderTransferLines();
 }
-function addTransferLine(){trLines.push({pid:'',qty:'',cost:'',name:'',price:''});renderTransferLines();}
-function removeTransferLine(i){trLines.splice(i,1);if(!trLines.length)trLines.push({pid:'',qty:'',cost:'',name:'',price:''});renderTransferLines();}
+function addTransferLine(){trLines.push({pid:'',qty:'',cost:'',name:'',price:'',text:''});renderTransferLines();}
+function removeTransferLine(i){trLines.splice(i,1);if(!trLines.length)trLines.push({pid:'',qty:'',cost:'',name:'',price:'',text:''});renderTransferLines();}
+// — type-to-search product picker used by the transfer form (name, category or barcode; ↑ ↓ Enter Esc)
+let trPop=null,trPopCtx=null;
+function trEnsurePop(){
+  if(trPop)return trPop;
+  trPop=document.createElement('div');trPop.id='tr-pop';
+  trPop.style.cssText='display:none;position:fixed;z-index:650;max-height:260px;overflow-y:auto;background:var(--surface);border:1px solid var(--accent);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);';
+  document.body.appendChild(trPop);
+  trPop.addEventListener('mousedown',e=>e.preventDefault()); // clicking a result must not take focus away from the box
+  window.addEventListener('resize',trClosePop);
+  return trPop;
+}
+function trClosePop(){if(trPop)trPop.style.display='none';trPopCtx=null;}
+function trMatches(q){
+  const toks=q.toLowerCase().split(/\s+/).filter(Boolean),ql=q.trim().toLowerCase();
+  let list=products.filter(p=>!(trMode==='out'&&p.stock<=0)); // can't send what isn't in stock
+  if(toks.length)list=list.filter(p=>{const hay=(p.name+' '+(p.cat||'')+' '+(p.barcode||'')).toLowerCase();return toks.every(t=>hay.includes(t));});
+  list.sort((a,b)=>((a.name.toLowerCase().startsWith(ql)?0:1)-(b.name.toLowerCase().startsWith(ql)?0:1))||a.name.localeCompare(b.name));
+  return list.slice(0,40);
+}
+function trShowPop(input,ln,i){
+  const pop=trEnsurePop(),q=input.value;
+  const items=trMatches(q).map(p=>({p}));
+  const exact=products.some(p=>p.name.toLowerCase()===q.trim().toLowerCase());
+  if(trMode==='in'&&q.trim()&&!exact)items.push({neu:trClean(q,80)});
+  trPopCtx={input,ln,i,items,idx:items.length?0:-1};
+  pop.innerHTML='';
+  if(!items.length){const e=document.createElement('div');e.textContent=q.trim()?'No product matches "'+q.trim()+'".':(trMode==='out'?'No products in stock.':'No products yet.');e.style.cssText='padding:10px 12px;color:var(--muted);font-size:13px;';pop.appendChild(e);}
+  items.forEach((it,k)=>{
+    const row=document.createElement('div');row.style.cssText='display:flex;justify-content:space-between;gap:10px;padding:8px 12px;cursor:pointer;font-size:13px;';
+    const a=document.createElement('span'),b=document.createElement('span');b.style.cssText='color:var(--muted);font-size:11px;font-family:var(--mono);white-space:nowrap;';
+    if(it.p){a.textContent=it.p.name;b.textContent=trMode==='out'?it.p.stock+' in stock':(it.p.cat||'');}
+    else{a.textContent='＋ New product: "'+it.neu+'"';a.style.color='var(--accent)';}
+    row.append(a,b);
+    row.onmouseenter=()=>{if(trPopCtx){trPopCtx.idx=k;trPaintPop();}};
+    row.onclick=()=>trPick(k);
+    pop.appendChild(row);
+  });
+  const r=input.getBoundingClientRect();
+  pop.style.display='block';pop.style.width=r.width+'px';pop.style.left=r.left+'px';
+  const h=Math.min(260,pop.scrollHeight);
+  pop.style.top=(r.bottom+4+h>window.innerHeight?Math.max(4,r.top-4-h):r.bottom+4)+'px';
+  trPaintPop();
+}
+function trPaintPop(){
+  if(!trPop||!trPopCtx)return;
+  [...trPop.children].forEach((row,k)=>{row.style.background=k===trPopCtx.idx?'var(--surface2)':'transparent';});
+  const cur=trPop.children[trPopCtx.idx];if(cur&&cur.scrollIntoView)cur.scrollIntoView({block:'nearest'});
+}
+function trPick(k){
+  const c=trPopCtx;if(!c)return;const it=c.items[k];if(!it)return;
+  if(it.p){c.ln.pid=it.p.id;c.ln.text=it.p.name;c.ln.name='';}
+  else{c.ln.pid='__new';c.ln.text=it.neu;c.ln.name=it.neu;}
+  trClosePop();renderTransferLines();
+  const q=document.querySelectorAll('#tr-lines input[placeholder="Qty"]')[c.i];if(q)q.focus(); // jump straight to the quantity
+}
 function renderTransferLines(){
+  trClosePop();
   const box=document.getElementById('tr-lines');box.innerHTML='';
   const mk=(tag,props)=>Object.assign(document.createElement(tag),props||{});
-  const sorted=[...products].sort((a,b)=>a.name.localeCompare(b.name));
   trLines.forEach((ln,i)=>{
     const wrap=mk('div');wrap.style.cssText='display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;';
     const row=mk('div');row.style.cssText='display:flex;gap:6px;align-items:center;';
-    const sel=mk('select',{className:'form-input'});sel.style.cssText='flex:1;min-width:0;';
-    sel.appendChild(mk('option',{value:'',textContent:'Choose a product…'}));
-    sorted.forEach(p=>{if(trMode==='out'&&p.stock<=0)return;sel.appendChild(mk('option',{value:p.id,textContent:p.name+(trMode==='out'?'  ('+p.stock+' in stock)':'')}));});
-    if(trMode==='in')sel.appendChild(mk('option',{value:'__new',textContent:'＋ New product (not in this shop yet)…'}));
-    sel.value=ln.pid;sel.onchange=()=>{ln.pid=sel.value;renderTransferLines();};
+    const inp=mk('input',{className:'form-input',type:'text',placeholder:'Type to search products…',value:ln.text||'',autocomplete:'off',spellcheck:false});inp.style.cssText='flex:1;min-width:0;';
+    inp.oninput=()=>{ln.text=inp.value;if(ln.pid==='__new')ln.name=inp.value;else ln.pid='';trShowPop(inp,ln,i);};
+    inp.onfocus=()=>{inp.select();trShowPop(inp,ln,i);};
+    inp.onkeydown=e=>{
+      const open=trPopCtx&&trPopCtx.input===inp;
+      if(!open){if(e.key==='ArrowDown'){e.preventDefault();trShowPop(inp,ln,i);}return;}
+      if(e.key==='ArrowDown'){e.preventDefault();trPopCtx.idx=Math.min(trPopCtx.items.length-1,trPopCtx.idx+1);trPaintPop();}
+      else if(e.key==='ArrowUp'){e.preventDefault();trPopCtx.idx=Math.max(0,trPopCtx.idx-1);trPaintPop();}
+      else if(e.key==='Enter'){e.preventDefault();e.stopPropagation();if(trPopCtx.idx>=0)trPick(trPopCtx.idx);}
+      else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();trClosePop();} // first Esc closes the list, a second one closes the window
+      else if(e.key==='Tab')trClosePop();
+    };
+    inp.onblur=()=>setTimeout(trClosePop,150);
     const qty=mk('input',{className:'form-input',type:'number',min:1,step:1,placeholder:'Qty',value:ln.qty});qty.style.cssText='width:84px;';qty.oninput=()=>{ln.qty=qty.value;};
     const del=mk('button',{className:'act-btn',type:'button',textContent:'✕'});del.style.margin='0';del.onclick=()=>removeTransferLine(i);
-    row.append(sel,qty,del);wrap.appendChild(row);
+    row.append(inp,qty,del);wrap.appendChild(row);
+    const p=ln.pid&&ln.pid!=='__new'?products.find(x=>x.id===ln.pid):null;
+    if(p){const h=mk('div',{textContent:(trMode==='out'?'In stock here: ':'Current stock here: ')+p.stock});h.style.cssText='font-size:11px;color:var(--muted);font-family:var(--mono);';wrap.appendChild(h);}
     if(trMode==='in'){
       const r2=mk('div');r2.style.cssText='display:flex;gap:6px;flex-wrap:wrap;';
       if(ln.pid==='__new'){
-        const nm=mk('input',{className:'form-input',type:'text',maxLength:80,placeholder:'New product name *',value:ln.name});nm.style.cssText='flex:2;min-width:140px;';nm.oninput=()=>{ln.name=nm.value;};
-        const pr=mk('input',{className:'form-input',type:'number',min:0,step:'any',placeholder:'Selling price *',value:ln.price});pr.style.cssText='flex:1;min-width:100px;';pr.oninput=()=>{ln.price=pr.value;};
-        r2.append(nm,pr);
+        const pr=mk('input',{className:'form-input',type:'number',min:0,step:'any',placeholder:'Selling price of the new product *',value:ln.price});pr.style.cssText='flex:1;min-width:160px;';pr.oninput=()=>{ln.price=pr.value;};r2.appendChild(pr);
       }
-      const co=mk('input',{className:'form-input',type:'number',min:0,step:'any',placeholder:ln.pid==='__new'?'Cost price (optional)':'Cost price (optional, blank = keep current)',value:ln.cost});co.style.cssText='flex:1;min-width:140px;';co.oninput=()=>{ln.cost=co.value;};
+      const co=mk('input',{className:'form-input',type:'number',min:0,step:'any',placeholder:ln.pid==='__new'?'Cost price (optional)':'Cost price (optional, blank = keep current)',value:ln.cost});co.style.cssText='flex:1;min-width:160px;';co.oninput=()=>{ln.cost=co.value;};
       r2.appendChild(co);wrap.appendChild(r2);
     }
     box.appendChild(wrap);
@@ -1742,12 +1819,14 @@ async function confirmTransfer(){
   if(shop.toLowerCase()===trClean(settings.shopName,60).toLowerCase()){toast("That is this shop. Enter the OTHER shop's name.");return;}
   const wanted=new Map();
   for(const ln of trLines){
-    if(!ln.pid&&!String(ln.qty).trim())continue; // empty row
+    const text=trClean(ln.text,80);let pid=ln.pid;
+    if(!pid&&!text&&!String(ln.qty).trim())continue; // empty row
     const q=parseInt(ln.qty,10);
-    if(!ln.pid){toast('Choose a product for each row.');return;}
+    if(!pid&&text){const ex=products.find(p=>p.name.toLowerCase()===text.toLowerCase());if(ex)pid=ex.id;} // typed the exact name without picking it
+    if(!pid){toast(text?'"'+text+'" is not in the list. '+(out?'Pick a product from the list.':'Pick it from the list, or choose "＋ New product".'):'Choose a product for each row.');return;}
     if(!q||q<=0){toast('Enter a quantity for each product.');return;}
-    if(ln.pid==='__new'){
-      const nm=trClean(ln.name,80),pr=parseFloat(ln.price);
+    if(pid==='__new'){
+      const nm=trClean(ln.name||text,80),pr=parseFloat(ln.price);
       if(!nm){toast('Enter the name of the new product.');return;}
       if(isNaN(pr)||pr<0){toast('Enter the selling price of "'+nm+'".');return;}
       const ex=products.find(p=>p.name.toLowerCase()===nm.toLowerCase());
@@ -1755,8 +1834,8 @@ async function confirmTransfer(){
       const w=wanted.get(key)||{pid:ex?ex.id:null,newName:nm,price:pr,qty:0,cost:parseFloat(ln.cost)};
       w.qty+=q;wanted.set(key,w);
     }else{
-      const w=wanted.get(ln.pid)||{pid:ln.pid,qty:0,cost:parseFloat(ln.cost)};
-      w.qty+=q;wanted.set(ln.pid,w);
+      const w=wanted.get(pid)||{pid,qty:0,cost:parseFloat(ln.cost)};
+      w.qty+=q;wanted.set(pid,w);
     }
   }
   if(!wanted.size){toast('Add at least one item.');return;}

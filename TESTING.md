@@ -74,3 +74,7 @@ Inventory → **🔁 Transfer**.
 * **History** lists every slip (newest first) and can reprint any of them.
 * The two shops are **not linked**: each records its own side. Tip: write the sender's slip number (for example TRF-OUT-0007) in the receiver's Note.
 * To correct a mistake, use Edit on the product (logged as "Manual Edit").
+
+## 14. Typing PINs and searching products in transfers (3.4.1)
+* **Lock screen:** after choosing a role, type the PIN on the keyboard (top row or number pad). Backspace deletes a digit, Esc goes back to the role list. The on-screen keypad still works. Typing in the "Forgot Owner PIN?" boxes is unaffected.
+* **Transfer form:** the product box is now type-to-search. Type any part of a name, in any order, or a category, or scan/type a barcode. Use the arrow keys and Enter to pick (the cursor then jumps to Quantity). While sending, sold-out products are not offered. While receiving, type a new name and choose "＋ New product". Esc closes the list first, then the window.
