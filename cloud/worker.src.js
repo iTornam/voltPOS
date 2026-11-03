@@ -4,6 +4,8 @@
 //   acct:<CODE>            -> { name, salt, hash, iter, shops:[{id,name,keyHash}], created }
 //   snap:<CODE>:<shopId>   -> { receivedAt, snapshot }      (latest snapshot only)
 //   sess:<token>           -> { code }                      (expires after 8 hours)
+//   chgq:<CODE>:<shopId>   -> [ change, ... ]               edits the OWNER asks for (only the owner's session writes this)
+//   chgr:<CODE>:<shopId>   -> { <id>: {status,note,at} }    what the SHOP did with them (only the shop's key writes this)
 //   fail:<CODE>            -> failed-login counter          (expires after 15 minutes)
 // Secrets: ADMIN_TOKEN (wrangler secret) - needed to create accounts.
 //
@@ -17,7 +19,7 @@ const MANIFEST = JSON.stringify({ name: 'VoltPOS Dashboard', short_name: 'VoltPO
 
 const enc = new TextEncoder();
 const SESSION_TTL = 8 * 3600;
-const MAX_BODY = 250 * 1024;
+const MAX_BODY = 900 * 1024;
 const MAX_FAILS = 8;
 const PBKDF2_ITER = 100000; // Cloudflare's maximum
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 chars: no 0/O/1/I, and no modulo bias
@@ -60,6 +62,104 @@ const cleanName = (v, max) => String(v || '').replace(/\s+/g, ' ').trim().slice(
 async function newPasswordRecord(password) {
   const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
   return { salt, iter: PBKDF2_ITER, hash: await pbkdf2(password, salt, PBKDF2_ITER) };
+}
+
+// ── Edits the owner asks for ──
+const CHANGE_TYPES = ['restock', 'price', 'low', 'add'];
+const MAX_PENDING = 100;
+const cleanText = (v, max) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+const intIn = (v, lo, hi) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : null; };
+const numIn = (v, lo, hi) => { const n = Number(v); return Number.isFinite(n) && n >= lo && n <= hi ? Math.round(n * 100) / 100 : null; };
+
+function cleanChange(c) {
+  if (!c || typeof c !== 'object' || !CHANGE_TYPES.includes(c.type)) throw new HttpError(400, 'Unknown kind of change.');
+  const out = { type: c.type };
+  if (c.type !== 'add') {
+    out.product = cleanText(c.product, 40);
+    out.name = cleanText(c.name, 80); // shown to the shop; also used to find the product if its id changed
+    if (!out.product && !out.name) throw new HttpError(400, 'Choose a product.');
+  }
+  if (c.type === 'restock') {
+    out.qty = intIn(c.qty, 1, 100000); if (out.qty === null) throw new HttpError(400, 'Quantity must be a whole number from 1 to 100000.');
+    if (c.cost !== undefined && c.cost !== null && c.cost !== '') { out.cost = numIn(c.cost, 0, 10000000); if (out.cost === null) throw new HttpError(400, 'Cost price looks wrong.'); }
+  } else if (c.type === 'price') {
+    out.price = numIn(c.price, 0, 10000000); if (out.price === null) throw new HttpError(400, 'Price looks wrong.');
+  } else if (c.type === 'low') {
+    out.low = intIn(c.low, 0, 100000); if (out.low === null) throw new HttpError(400, 'Low-stock level must be a whole number.');
+  } else { // add
+    out.name = cleanText(c.name, 80); if (!out.name) throw new HttpError(400, 'Enter the product name.');
+    out.cat = cleanText(c.cat, 40) || 'General';
+    out.price = numIn(c.price, 0, 10000000); if (out.price === null) throw new HttpError(400, 'Selling price looks wrong.');
+    out.cost = c.cost === undefined || c.cost === null || c.cost === '' ? 0 : numIn(c.cost, 0, 10000000); if (out.cost === null) throw new HttpError(400, 'Cost price looks wrong.');
+    out.stock = c.stock === undefined || c.stock === '' ? 0 : intIn(c.stock, 0, 100000); if (out.stock === null) throw new HttpError(400, 'Opening stock must be a whole number.');
+    out.low = c.low === undefined || c.low === '' ? 5 : intIn(c.low, 0, 100000); if (out.low === null) throw new HttpError(400, 'Low-stock level must be a whole number.');
+    out.barcode = cleanText(c.barcode, 40);
+  }
+  return out;
+}
+const sessionAcct = async (request, env) => {
+  const auth = request.headers.get('Authorization') || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const sess = token && /^[A-Z2-9]{40}$/.test(token) ? await env.VOLT.get('sess:' + token, 'json') : null;
+  const acct = sess ? await getAcct(env, sess.code) : null;
+  if (!acct) throw new HttpError(401, 'Please sign in again.');
+  return { code: sess.code, acct };
+};
+async function shopAuth(request, env) { // a shop proves itself with its own key
+  const code = (request.headers.get('X-Account') || '').toUpperCase();
+  const shopId = request.headers.get('X-Shop') || '';
+  const acct = await getAcct(env, code);
+  const shop = acct && acct.shops.find((s) => s.id === shopId);
+  if (!shop || !safeEqual(await sha256(request.headers.get('X-Key') || ''), shop.keyHash)) throw new HttpError(401, 'Wrong account code, shop ID or key.');
+  return { code, shop };
+}
+const queueKey = (code, id) => `chgq:${code}:${id}`;
+const resultKey = (code, id) => `chgr:${code}:${id}`;
+
+// the owner asks for a change
+async function createChange(request, env) {
+  const { code, acct } = await sessionAcct(request, env);
+  const b = await readJSON(request);
+  const shop = acct.shops.find((s) => s.id === b.shop);
+  if (!shop) throw new HttpError(404, 'No such shop.');
+  const change = cleanChange(b.change);
+  const queue = (await env.VOLT.get(queueKey(code, shop.id), 'json')) || [];
+  const results = (await env.VOLT.get(resultKey(code, shop.id), 'json')) || {};
+  const pending = queue.filter((c) => !results[c.id]).length;
+  if (pending >= MAX_PENDING) throw new HttpError(429, 'This shop already has ' + MAX_PENDING + ' changes waiting. Wait for it to catch up.');
+  const rec = { id: randomString(12), at: Date.now(), ...change };
+  queue.push(rec);
+  // tidy up: keep everything still waiting, plus the 60 most recent finished ones
+  const fin = queue.filter((c) => results[c.id]);
+  const drop = new Set(fin.slice(0, Math.max(0, fin.length - 60)).map((c) => c.id));
+  await env.VOLT.put(queueKey(code, shop.id), JSON.stringify(queue.filter((c) => !drop.has(c.id))));
+  return json({ ok: true, id: rec.id });
+}
+// the shop collects what is waiting for it
+async function pullChanges(request, env) {
+  const { code, shop } = await shopAuth(request, env);
+  const queue = (await env.VOLT.get(queueKey(code, shop.id), 'json')) || [];
+  const results = (await env.VOLT.get(resultKey(code, shop.id), 'json')) || {};
+  return json({ ok: true, changes: queue.filter((c) => !results[c.id]).slice(0, 50) });
+}
+// the shop reports what it did
+async function ackChanges(request, env) {
+  const { code, shop } = await shopAuth(request, env);
+  const b = await readJSON(request);
+  const queue = (await env.VOLT.get(queueKey(code, shop.id), 'json')) || [];
+  const known = new Set(queue.map((c) => c.id));
+  const results = (await env.VOLT.get(resultKey(code, shop.id), 'json')) || {};
+  let n = 0;
+  for (const r of (Array.isArray(b.results) ? b.results : []).slice(0, 100)) {
+    if (!r || !known.has(r.id) || results[r.id]) continue; // unknown id, or already settled: ignore
+    if (!['applied', 'rejected', 'failed'].includes(r.status)) continue;
+    results[r.id] = { status: r.status, note: cleanText(r.note, 120), at: Date.now() };
+    n++;
+  }
+  const ids = Object.keys(results);
+  if (ids.length > 200) ids.sort((a, z) => results[a].at - results[z].at).slice(0, ids.length - 200).forEach((i) => delete results[i]);
+  await env.VOLT.put(resultKey(code, shop.id), JSON.stringify(results));
+  return json({ ok: true, settled: n });
 }
 
 // ── A shop pushes its latest snapshot ──
@@ -108,7 +208,10 @@ async function data(request, env) {
   if (!acct) throw new HttpError(401, 'Please sign in again.');
   const shops = await Promise.all(acct.shops.map(async (s) => {
     const rec = await env.VOLT.get(`snap:${sess.code}:${s.id}`, 'json');
-    return { id: s.id, name: s.name, receivedAt: rec ? rec.receivedAt : null, snapshot: rec ? rec.snapshot : null };
+    const queue = (await env.VOLT.get(queueKey(sess.code, s.id), 'json')) || [];
+    const results = (await env.VOLT.get(resultKey(sess.code, s.id), 'json')) || {};
+    const changes = queue.slice(-40).reverse().map((c) => ({ ...c, status: results[c.id] ? results[c.id].status : 'pending', note: results[c.id] ? results[c.id].note : '', doneAt: results[c.id] ? results[c.id].at : null }));
+    return { id: s.id, name: s.name, receivedAt: rec ? rec.receivedAt : null, snapshot: rec ? rec.snapshot : null, changes };
   }));
   return json({ ok: true, name: acct.name, shops, now: Date.now() });
 }
@@ -165,7 +268,7 @@ async function admin(request, env, action) {
     return json({ ok: true });
   }
   if (action === 'delete-account') {
-    await Promise.all(acct.shops.map((s) => env.VOLT.delete(`snap:${code}:${s.id}`)));
+    await Promise.all(acct.shops.flatMap((s) => [env.VOLT.delete(`snap:${code}:${s.id}`), env.VOLT.delete(queueKey(code, s.id)), env.VOLT.delete(resultKey(code, s.id))]));
     await env.VOLT.delete('acct:' + code);
     return json({ ok: true });
   }
@@ -186,6 +289,9 @@ async function route(request, env) {
   if (m === 'GET' && pathname === '/api/health') return json({ ok: true, service: 'voltpos-remote' });
   if (m === 'POST' && pathname === '/api/push') return push(request, env);
   if (m === 'POST' && pathname === '/api/login') return login(request, env);
+  if (m === 'POST' && pathname === '/api/changes') return createChange(request, env);
+  if (m === 'POST' && pathname === '/api/pull') return pullChanges(request, env);
+  if (m === 'POST' && pathname === '/api/ack') return ackChanges(request, env);
   if (m === 'GET' && pathname === '/api/data') return data(request, env);
   if (m === 'POST' && pathname.startsWith('/api/admin/')) return admin(request, env, pathname.slice('/api/admin/'.length));
   return json({ ok: false, error: 'Not found' }, 404);

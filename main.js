@@ -90,7 +90,7 @@ function startServer() {
     if (pathname.startsWith('/api/remote/')) {
       const action = pathname.replace('/api/remote/', '');
       if (req.method === 'GET' && action === 'status') { sendJSON(res, remoteStatusPayload()); return; }
-      if (req.method === 'POST') { readJSONBody(req, res, (body) => handleRemote(action, body, res), 300000); return; }
+      if (req.method === 'POST') { readJSONBody(req, res, (body) => handleRemote(action, body, res), 1000000); return; }
     }
 
     // API: load data
@@ -423,24 +423,27 @@ function cleanRemoteUrl(u) {
     return x.origin;
   } catch (e) { return null; }
 }
-async function cloudPush(rc, snapshot) {
+async function cloudCall(rc, pathName, payload) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 15000);
   try {
-    const r = await fetch(rc.url + '/api/push', {
+    const r = await fetch(rc.url + pathName, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Account': rc.account, 'X-Shop': rc.shop, 'X-Key': rc.key },
-      body: JSON.stringify(snapshot),
+      body: JSON.stringify(payload),
       signal: ctl.signal,
     });
-    if (r.ok) return { ok: true };
-    if (r.status === 401) return { ok: false, error: 'The server rejected the account code, shop ID or shop key. Check them in Settings.' };
-    if (r.status === 413) return { ok: false, error: 'The snapshot was too large for the server.' };
-    return { ok: false, error: `The server answered with an error (${r.status}).` };
+    let json = null;
+    try { json = await r.json(); } catch (e) {}
+    if (r.ok) return { ok: true, json };
+    if (r.status === 401) return { ok: false, status: 401, error: 'The server rejected the account code, shop ID or shop key. Check them in Settings.' };
+    if (r.status === 413) return { ok: false, status: 413, error: 'The snapshot was too large for the server.' };
+    return { ok: false, status: r.status, error: `The server answered with an error (${r.status}).` };
   } catch (e) {
     return { ok: false, offline: true, error: 'Could not reach the server. Are you online?' };
   } finally { clearTimeout(timer); }
 }
+const cloudPush = (rc, snapshot) => cloudCall(rc, '/api/push', snapshot);
 
 async function handleRemote(action, b, res) {
   try {
@@ -481,6 +484,25 @@ async function handleRemote(action, b, res) {
       if (r.ok) { remoteStatus.lastOk = Date.now(); remoteStatus.lastError = null; return sendJSON(res, { ok: true, at: remoteStatus.lastOk }); }
       remoteStatus.lastError = r.error;
       return sendJSON(res, { ok: false, offline: !!r.offline, error: r.error });
+    }
+
+    // Changes the owner asked for on the online page: fetch what is waiting, then report what was done.
+    if (action === 'pull') {
+      const rc = sec.remote;
+      if (!rc || !rc.url || !rc.key || !rc.enabled) return sendJSON(res, { ok: true, skipped: true, changes: [] });
+      const r = await cloudCall(rc, '/api/pull', {});
+      if (!r.ok && r.status === 404) return sendJSON(res, { ok: true, unsupported: true, changes: [] }); // the cloud has not been updated yet: nothing to collect, no error
+      if (!r.ok) { remoteStatus.lastError = r.error; return sendJSON(res, { ok: false, offline: !!r.offline, error: r.error, changes: [] }); }
+      return sendJSON(res, { ok: true, changes: Array.isArray(r.json && r.json.changes) ? r.json.changes : [] });
+    }
+    if (action === 'ack') {
+      const rc = sec.remote;
+      if (!rc || !rc.url || !rc.key) return bad('Remote dashboard is not set up.');
+      const results = (Array.isArray(b.results) ? b.results : []).slice(0, 100).map((x) => ({ id: String(x.id || ''), status: String(x.status || ''), note: String(x.note || '').slice(0, 120) }));
+      if (!results.length) return sendJSON(res, { ok: true, settled: 0 });
+      const r = await cloudCall(rc, '/api/ack', { results });
+      if (!r.ok) return sendJSON(res, { ok: false, offline: !!r.offline, error: r.error });
+      return sendJSON(res, { ok: true, settled: r.json ? r.json.settled : 0 });
     }
 
     return bad('Unknown action.', 404);

@@ -78,3 +78,25 @@ Inventory → **🔁 Transfer**.
 ## 14. Typing PINs and searching products in transfers (3.4.1)
 * **Lock screen:** after choosing a role, type the PIN on the keyboard (top row or number pad). Backspace deletes a digit, Esc goes back to the role list. The on-screen keypad still works. Typing in the "Forgot Owner PIN?" boxes is unaffected.
 * **Transfer form:** the product box is now type-to-search. Type any part of a name, in any order, or a category, or scan/type a barcode. Use the arrow keys and Enter to pick (the cursor then jumps to Quantity). While sending, sold-out products are not offered. While receiving, type a new name and choose "＋ New product". Esc closes the list first, then the window.
+
+## 15. Role restrictions (3.4.2)
+Set Owner, Manager and Cashier PINs, then check:
+1. As **Owner**, open Settings (or Profit), then press 🔒 Lock. Sign in as **Cashier**: you must land on the **Dashboard**, never on the page the Owner left open. Anything the Owner had open (reports, the recovery code) is closed by locking.
+2. As **Cashier**, the Dashboard's Low Stock "View All", Recent Sales "View All" are hidden, and the Outstanding Credit card does nothing. Only Dashboard and Point of Sale are available.
+3. As **Manager**: Inventory, Customers, Sales and Credits open; Expenses, Profit & Reports and Settings do not.
+4. If the next person is allowed to see the page that was open (for example Owner → Manager on Inventory), it stays open.
+5. With **no PINs** set, nothing is restricted.
+Note: these restrictions are enforced by the VoltPOS screens on the shop PC. They keep staff out of pages they shouldn't use. They are not a defence against someone who can open the data folder.
+
+## 16. Inventory on the owner page and owner changes (3.5.0)
+Deploy the cloud first (`cd cloud && npm run deploy`), then install 3.5.0 at the shop.
+1. Owner page → your shop → **Inventory (N products)**. Search, and try the Low stock / Sold out filters. Tap a product to open its restock, price and low-level forms. **＋ Add product** opens the new-product form.
+2. Send a restock (for example +20). The page says "Sent" and lists it under **Your changes** as ⏳ waiting.
+3. At the shop (within ~2 minutes): **📥 Owner changes (1)** appears in the header. By default everyone signed in (Cashiers too) sees it and can approve or reject; Cashiers never see cost prices in the descriptions. In Settings → Remote Dashboard you can untick **Cashiers can also approve the owner's changes** to limit it to Owner and Manager. Click it, check the wording (it shows the stock before and after), then **Approve**. Stock rises by 20, and Stock History shows "Restock · owner (remote)".
+4. Owner page → Refresh: the change shows ✓ applied and the inventory shows the new stock.
+5. **Reject** a price change: the price stays as it was, and the owner sees ✗ rejected by the shop.
+6. Settings → Remote Dashboard → tick **Apply the owner's stock changes automatically** → Save. The next owner change applies by itself.
+7. A change for a product the shop doesn't have fails safely ("product not found") and the owner is told.
+
+## 17. Cashiers approving owner changes (3.5.1)
+With the box ticked (default), sign in as **Cashier** while an owner change is waiting: the 📥 button is there, the descriptions show no cost price, Approve and Reject work, and Stock History records who approved. Untick the box in Settings and the Cashier no longer sees it, while a Manager still does.

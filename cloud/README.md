@@ -18,7 +18,13 @@ This lets an owner open **one web page on his phone** and see how his shop(s) ar
 * **Sales: last 7 days** — every sale, grouped by day with each day's total. Tap a sale to see what was sold (item, quantity, line total, discount). Search by customer or product. If a shop sells more than 400 in a week, the page says it is showing the latest 400.
 * **Last 7 and 30 days**, a **14-day chart** (tap a bar to see that day), best sellers, who owes money, and recent expenses.
 * **Hide profit** button (remembers the choice), automatic light/dark mode, and an icon so it can be added to the phone's home screen.
-* It is **view-only**. Nothing can be changed from the page.
+* **Inventory:** every product (name, category, price, cost, stock, low-stock level), with search and Low / Sold-out filters.
+* **Sending stock changes to the shop:** tap a product, then **restock** (adds a quantity), change the **price**, or change the **low-stock level**. **＋ Add product** creates a new one. The page then shows each change as waiting, applied, rejected or failed.
+
+### How owner changes reach the shop
+The change waits on the server. The shop app collects it within about 2 minutes while it is open and online. By default someone at the shop sees **📥 Owner changes** at the top of VoltPOS and **approves or rejects** each one. In Settings → Remote Dashboard the shop can switch on **Apply the owner's stock changes automatically**. Restocks add to the stock (they never overwrite it), a change is never applied twice, and everything is recorded in Stock History as "owner (remote)". Changes for a shop that is switched off just wait until it is back online.
+* The owner cannot delete products, change names or categories, or touch past sales from the page.
+* **Deploy the cloud update BEFORE you install the new shop version**, so the shops find the server ready (a shop talking to an older server simply sees nothing to collect).
 
 ## One-time setup (you do this once for ALL your clients)
 
@@ -73,6 +79,7 @@ node manage.js delete         <url> <ADMIN_TOKEN> <ACCOUNT>                 # re
 
 ## Costs and limits (Cloudflare free plan; check current limits on their pricing page)
 
+* Owner changes use a few extra writes per change (about 2 each), which is negligible.
 * Free plan allows roughly **1,000 data writes per day for the whole account**. Each shop uses roughly 100 to 150 a day, so the free plan comfortably covers **about 5 to 8 shops**. Beyond that, Cloudflare's paid plan is about **US$5 per month** and removes the limit.
 * If a shop stops updating, the dot on the owner page turns amber, then red. Common reasons: the shop PC is off, VoltPOS is closed, or there's no internet.
 

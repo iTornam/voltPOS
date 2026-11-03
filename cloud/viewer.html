@@ -70,6 +70,11 @@ tr:last-child td{border-bottom:none}
 .srow .items{margin:8px 0 2px;padding:8px 10px;background:var(--surface2);border-radius:8px;font-size:12.5px}
 .srow .items div{display:flex;justify-content:space-between;gap:10px;padding:2px 0}
 .dayh{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);font-weight:600;padding:10px 2px 4px;text-transform:uppercase;letter-spacing:.05em}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px}
+.chip2{border:1px solid var(--border);background:var(--surface2);border-radius:999px;padding:4px 12px;cursor:pointer;font-size:12px}.chip2.on{border-color:var(--accent);color:var(--accent)}
+.frow{display:flex;gap:6px;align-items:center;margin:6px 0;flex-wrap:wrap}.frow .lbl{width:100%;font-size:11px;color:var(--muted)}.frow .input{padding:8px 10px;min-width:0;flex:1}
+.imsg{font-size:13px;margin:0 0 8px}.imsg.ok{color:var(--success)}.imsg.bad{color:var(--danger)}
+.addbox{border:1px dashed var(--border);border-radius:10px;padding:10px;margin-bottom:10px}
 .empty{color:var(--muted);font-size:13px;padding:6px 0}
 .foot{margin:22px 0 8px;text-align:center;font-size:11px;color:var(--muted)}
 </style>
@@ -79,7 +84,7 @@ tr:last-child td{border-bottom:none}
 <script>
 (function(){
 'use strict';
-var app=document.getElementById('app'),S={token:sessionStorage.getItem('vp_tok')||'',data:null,sel:'all',timer:null,hide:localStorage.getItem('vp_hide_profit')==='1',day:{},q:{},open:{}};
+var app=document.getElementById('app'),S={token:sessionStorage.getItem('vp_tok')||'',data:null,sel:'all',timer:null,hide:localStorage.getItem('vp_hide_profit')==='1',day:{},q:{},open:{},inv:{}};
 
 // tiny safe DOM builder: text is always set as text, never as HTML
 function h(tag,attrs){var e=document.createElement(tag);attrs=attrs||{};for(var k in attrs){if(k==='class')e.className=attrs[k];else if(k==='text')e.textContent=attrs[k];else if(k.slice(0,2)==='on')e.addEventListener(k.slice(2),attrs[k]);else e.setAttribute(k,attrs[k]);}
@@ -113,12 +118,14 @@ function showLogin(msg){
 }
 
 // ── data ──
-function load(){
+function load(auto){
   api('/api/data').then(function(r){
     if(r._status===401){showLogin('Please sign in again.');return;}
     if(!r.ok){return;}
+    var ae=document.activeElement;
+    if(auto===true&&ae&&(ae.tagName==='INPUT'||ae.tagName==='SELECT'||ae.tagName==='TEXTAREA')){S.data=r;return;} // don't wipe a form while it is being filled in
     S.data=r;render();
-    clearInterval(S.timer);S.timer=setInterval(load,60000);
+    clearInterval(S.timer);S.timer=setInterval(function(){load(true);},60000);
   }).catch(function(){if(S.data){S.data.offline=true;render();}});
 }
 
@@ -183,6 +190,109 @@ function renderAll(box,d){
 
 function listCard(title,rows,empty){return h('div',null,h('h2',{text:title}),h('div',{class:'card'},rows||h('div',{class:'empty',text:empty})));}
 
+function invState(id){return S.inv[id]||(S.inv[id]={q:'',f:'all',open:null,more:false,add:false,d:{},a:{},ok:'',err:''});}
+function describeChange(c,cur){
+  if(c.type==='restock')return 'Restock +'+num(c.qty)+' × '+c.name;
+  if(c.type==='price')return 'Price of '+c.name+' → '+money(c.price,cur);
+  if(c.type==='low')return 'Low-stock level of '+c.name+' → '+num(c.low);
+  if(c.type==='add')return 'Add new product: '+c.name+' ('+money(c.price,cur)+', '+num(c.stock||0)+' in stock)';
+  return 'Change';
+}
+function inventorySection(sn,s,cur,d){
+  var box=h('div'),inv=sn.inventory;
+  box.appendChild(h('h2',{text:'Inventory'+(Array.isArray(inv)?' ('+num(sn.inventoryTotal||inv.length)+' products)':'')}));
+  if(!Array.isArray(inv)){box.appendChild(h('div',{class:'card'},h('div',{class:'empty',text:'This shop is running an older VoltPOS version. Update the shop app to see its inventory here and to send stock changes.'})));return box;}
+  var st=invState(s.id),card=h('div',{class:'card',id:'inv-card'}),list=h('div'),more=h('div',{style:'margin-top:8px'});
+  var stale=!s.receivedAt||(d.now-s.receivedAt)/60000>180;
+  function send(change,summary,done){
+    if(!window.confirm('Send to '+s.name+'?\n\n'+summary+'\n\nThe shop applies it when its computer is online, after someone there approves it (unless the shop applies changes automatically).'))return;
+    api('/api/changes',{method:'POST',body:{shop:s.id,change:change}}).then(function(r){
+      if(!r.ok){st.err=r.error||'Could not send.';st.ok='';}
+      else{st.ok='Sent to '+s.name+'. '+(stale?'The shop looks offline right now, so it will apply once the shop computer is back online.':'It will show as applied once the shop has dealt with it.');st.err='';if(done)done();}
+      load(false);
+    }).catch(function(){st.err='No internet connection.';st.ok='';render();});
+  }
+  if(st.ok)card.appendChild(h('div',{class:'imsg ok',text:st.ok}));
+  if(st.err)card.appendChild(h('div',{class:'imsg bad',text:st.err}));
+  var search=h('input',{class:'input',type:'search',placeholder:'Search name, category or barcode',autocomplete:'off',style:'margin-bottom:8px'});search.value=st.q;
+  var chips=h('div',{class:'chips'});
+  [['all','All'],['low','Low stock'],['out','Sold out']].forEach(function(f){chips.appendChild(h('button',{class:'chip2'+(st.f===f[0]?' on':''),text:f[1],onclick:function(){st.f=f[0];st.open=null;render();}}));});
+  chips.appendChild(h('button',{class:'chip2'+(st.add?' on':''),text:st.add?'✕ Close':'＋ Add product',onclick:function(){st.add=!st.add;render();}}));
+  card.appendChild(search);card.appendChild(chips);
+  if(st.add){
+    var a=st.a,cats=[];inv.forEach(function(p){if(p.cat&&cats.indexOf(p.cat)<0)cats.push(p.cat);});
+    var dl=h('datalist',{id:'cats-'+s.id});cats.forEach(function(c){dl.appendChild(h('option',{value:c}));});
+    function fld(key,ph,type,flex){var i=h('input',{class:'input',type:type||'text',placeholder:ph,autocomplete:'off',style:flex?'flex:'+flex:''});if(type==='number'){i.min='0';i.step='any';}i.value=a[key]||'';i.addEventListener('input',function(){a[key]=i.value;});return i;}
+    var cat=fld('cat','Category (e.g. General)');cat.setAttribute('list','cats-'+s.id);
+    var form=h('div',{class:'addbox'},h('div',{class:'muted',style:'font-size:12px;margin-bottom:4px',text:'New product for '+s.name}),dl,
+      h('div',{class:'frow'},fld('name','Product name *','text',2)),h('div',{class:'frow'},cat),
+      h('div',{class:'frow'},fld('price','Selling price *','number'),fld('cost','Cost price','number')),
+      h('div',{class:'frow'},fld('stock','Opening stock','number'),fld('low','Low-stock level','number'),fld('barcode','Barcode')));
+    form.appendChild(h('button',{class:'btn primary',text:'Send to shop',onclick:function(){
+      if(!String(a.name||'').trim()){st.err='Enter the product name.';st.ok='';render();return;}
+      if(a.price===undefined||a.price===''||isNaN(Number(a.price))){st.err='Enter the selling price.';st.ok='';render();return;}
+      send({type:'add',name:a.name,cat:a.cat,price:a.price,cost:a.cost,stock:a.stock,low:a.low,barcode:a.barcode},'Add new product: '+a.name+' at '+money(a.price,cur)+(a.stock?', '+a.stock+' in stock':''),function(){st.a={};st.add=false;});}}));
+    card.appendChild(form);
+  }
+  function editPanel(p){
+    var dd=st.d[p.id]||(st.d[p.id]={}),panel=h('div',{class:'items'});
+    panel.appendChild(h('div',null,h('span',{class:'muted',text:'Selling price'}),h('span',{class:'mono',text:money(p.price,cur)})));
+    panel.appendChild(h('div',null,h('span',{class:'muted',text:'Cost price'}),h('span',{class:'mono',text:pv(p.cost,cur)})));
+    panel.appendChild(h('div',null,h('span',{class:'muted',text:'Low-stock level'}),h('span',{class:'mono',text:num(p.low)})));
+    function inp(key,ph,step){var i=h('input',{class:'input',type:'number',min:'0',step:step||'any',placeholder:ph});i.value=dd[key]||'';i.addEventListener('input',function(){dd[key]=i.value;});return i;}
+    function btn(label,fn){return h('button',{class:'btn primary',text:label,onclick:fn});}
+    function bad(msg){st.err=msg;st.ok='';render();}
+    var base={product:p.id,name:p.name};
+    var qty=inp('qty','Add how many?','1'),rcost=inp('cost','New cost (optional)');
+    panel.appendChild(h('div',{class:'frow'},h('div',{class:'lbl',text:'Restock: add to the current '+num(p.stock)}),qty,rcost,btn('Send',function(){
+      var q=Number(dd.qty);if(!Number.isInteger(q)||q<1)return bad('Enter a whole number to add (1 or more).');
+      send(Object.assign({type:'restock',qty:q},base,dd.cost!==undefined&&dd.cost!==''?{cost:dd.cost}:{}),'Restock +'+q+' × '+p.name+' (now '+p.stock+')',function(){dd.qty='';dd.cost='';});})));
+    var price=inp('price','New selling price');
+    panel.appendChild(h('div',{class:'frow'},h('div',{class:'lbl',text:'Change the selling price'}),price,btn('Send',function(){
+      if(dd.price===undefined||dd.price===''||isNaN(Number(dd.price))||Number(dd.price)<0)return bad('Enter the new price.');
+      send(Object.assign({type:'price',price:dd.price},base),'Change the price of '+p.name+' from '+money(p.price,cur)+' to '+money(dd.price,cur),function(){dd.price='';});})));
+    var low=inp('low','New low-stock level','1');
+    panel.appendChild(h('div',{class:'frow'},h('div',{class:'lbl',text:'Change the low-stock level'}),low,btn('Send',function(){
+      var v=Number(dd.low);if(dd.low===undefined||dd.low===''||!Number.isInteger(v)||v<0)return bad('Enter a whole number (0 or more).');
+      send(Object.assign({type:'low',low:v},base),'Set the low-stock level of '+p.name+' to '+v,function(){dd.low='';});})));
+    return panel;
+  }
+  function paint(){
+    list.replaceChildren();more.replaceChildren();
+    var toks=st.q.toLowerCase().split(/\s+/).filter(Boolean);
+    var rows=inv.filter(function(p){
+      if(st.f==='low'&&!(p.stock>0&&p.stock<=p.low))return false;
+      if(st.f==='out'&&!(p.stock<=0))return false;
+      if(!toks.length)return true;
+      var hay=(p.name+' '+p.cat+' '+p.barcode).toLowerCase();return toks.every(function(t){return hay.indexOf(t)>=0;});});
+    if(!rows.length){list.appendChild(h('div',{class:'empty',text:inv.length?'No products match.':'No products yet.'}));return;}
+    (st.more?rows:rows.slice(0,60)).forEach(function(p){
+      var open=st.open===p.id;
+      var row=h('div',{class:'srow'},h('div',{class:'top2',onclick:function(){st.open=open?null:p.id;paint();}},
+        h('div',null,h('div',{text:p.name}),h('div',{class:'muted',style:'font-size:11px',text:[p.cat,p.barcode].filter(Boolean).join(' · ')})),
+        h('div',{style:'text-align:right'},h('div',{class:'mono '+(p.stock<=0?'neg':p.stock<=p.low?'acc':''),text:p.stock<=0?'OUT':num(p.stock)+' in stock'}),h('div',{class:'muted mono',style:'font-size:11px',text:money(p.price,cur)}))));
+      if(open)row.appendChild(editPanel(p));
+      list.appendChild(row);});
+    if(!st.more&&rows.length>60)more.appendChild(h('button',{class:'btn',text:'Show all '+rows.length,onclick:function(){st.more=true;paint();}}));
+  }
+  search.addEventListener('input',function(){st.q=search.value;st.more=false;paint();});
+  paint();card.appendChild(list);card.appendChild(more);
+  if((sn.inventoryTotal||0)>inv.length)card.appendChild(h('div',{class:'muted',style:'font-size:12px;margin-top:8px',text:'Showing the first '+inv.length+' of '+sn.inventoryTotal+' products.'}));
+  box.appendChild(card);return box;
+}
+function changesSection(s,d,cur){
+  var list=s.changes||[];if(!list.length)return null;
+  var box=h('div');box.appendChild(h('h2',{text:'Your changes to '+s.name}));
+  var card=h('div',{class:'card'}),waiting=list.filter(function(c){return c.status==='pending';}).length;
+  if(waiting&&(!s.receivedAt||(d.now-s.receivedAt)/60000>180))card.appendChild(h('div',{class:'imsg bad',text:'The shop computer looks offline. '+waiting+' change'+(waiting===1?'':'s')+' will apply when it is back online.'}));
+  list.slice(0,15).forEach(function(c){
+    var chip=c.status==='pending'?['⏳ waiting for the shop','']:c.status==='applied'?['✓ applied','pos']:c.status==='rejected'?['✗ rejected by the shop','neg']:['⚠ failed','neg'];
+    card.appendChild(h('div',{class:'srow',style:'cursor:default'},h('div',{class:'top2'},
+      h('div',null,h('div',{text:describeChange(c,cur)}),h('div',{class:'muted',style:'font-size:11px',text:when(new Date(c.at).toISOString())+(c.note?' · '+c.note:'')})),
+      h('div',{class:chip[1],style:'font-size:12px;white-space:nowrap',text:chip[0]}))));});
+  box.appendChild(card);return box;
+}
+
 function dayKey(iso){var d=new Date(iso);return isNaN(d)?'':d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();}
 function dayLabel(iso){var d=new Date(iso);if(isNaN(d))return '';var n=new Date(),y=new Date(n.getTime()-864e5);
   if(dayKey(iso)===dayKey(n.toISOString()))return 'Today';if(dayKey(iso)===dayKey(y.toISOString()))return 'Yesterday';
@@ -226,7 +336,7 @@ function salesSection(sn,cur,shopId){
   note.textContent=legacy?'This shop is running an older VoltPOS version that sends only its last '+list.length+' sales. Update the shop app to see all 7 days with items.'
     :(total7>list.length?'Showing the latest '+list.length+' of '+total7+' sales from the last 7 days.':'All '+list.length+' sale'+(list.length===1?'':'s')+' from the last 7 days.');
   box.appendChild(h('h2',{text:'Sales: last 7 days'}));
-  box.appendChild(h('div',{class:'card'},search,listBox,note));
+  box.appendChild(h('div',{class:'card',id:'sales-card'},search,listBox,note));
   return box;
 }
 
@@ -259,6 +369,8 @@ function renderShop(box,s,d){
     var info=h('div',{class:'dayinfo'},h('span',{text:dlabel}),h('span',null,'Revenue ',h('b',{text:money(dd.revenue,cur)})),h('span',null,'Profit ',h('b',{text:pv(dd.profit,cur)})));
     box.appendChild(h('h2',{text:'Revenue, last '+days.length+' days (tap a bar)'}));box.appendChild(h('div',{class:'card'},bars,lbl,info));}
 
+  box.appendChild(inventorySection(sn,s,cur,d));
+  var chg=changesSection(s,d,cur);if(chg)box.appendChild(chg);
   box.appendChild(salesSection(sn,cur,s.id));
   var two=h('div',{class:'two'});
   var cc=(sn.creditCustomers||[]),ct=null;
@@ -283,7 +395,7 @@ function render(){
   if(S.sel!=='all'&&!d.shops.some(function(s){return s.id===S.sel;}))S.sel=multi?'all':d.shops[0].id;
   var root=h('div');
   root.appendChild(h('div',{class:'top'},h('div',null,h('div',{class:'brand',text:'⚡ VOLT'},h('span',{text:'POS'})),h('div',{class:'who',text:d.name})),
-    h('div',null,h('button',{class:'btn',text:S.hide?'👁 Show profit':'🙈 Hide profit',onclick:function(){S.hide=!S.hide;localStorage.setItem('vp_hide_profit',S.hide?'1':'0');render();}}),' ',h('button',{class:'btn',text:'Refresh',onclick:load}),' ',h('button',{class:'btn',text:'Sign out',onclick:function(){showLogin('');}}))));
+    h('div',null,h('button',{class:'btn',text:S.hide?'👁 Show profit':'🙈 Hide profit',onclick:function(){S.hide=!S.hide;localStorage.setItem('vp_hide_profit',S.hide?'1':'0');render();}}),' ',h('button',{class:'btn',text:'Refresh',onclick:function(){load(false);}}),' ',h('button',{class:'btn',text:'Sign out',onclick:function(){showLogin('');}}))));
   if(multi||true){var tabs=h('div',{class:'tabs'});
     if(multi)tabs.appendChild(h('button',{class:'tab'+(S.sel==='all'?' on':''),text:'All shops',onclick:function(){S.sel='all';render();}}));
     d.shops.forEach(function(s){tabs.appendChild(h('button',{class:'tab'+(S.sel===s.id?' on':''),onclick:function(){S.sel=s.id;render();}},h('span',{class:'dot '+fresh(s.receivedAt,d.now)}),s.name));});

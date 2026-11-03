@@ -46,6 +46,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:0 2
 .products-grid{flex:1;overflow-y:auto;padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:10px;align-content:start}
 .product-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px;cursor:pointer;display:flex;flex-direction:column;gap:5px}
 .product-card:hover{border-color:var(--accent);background:var(--surface2)}.product-card:active{transform:scale(.97)}
+.role-hidden{display:none!important}.role-locked{pointer-events:none;cursor:default!important}
 .product-card.out{opacity:.5;cursor:not-allowed;border-style:dashed}.product-card.out:hover{border-color:var(--border);background:var(--surface)}.product-card.out:active{transform:none}
 .product-card.selected{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)44}
 .product-name{font-size:12px;font-weight:500;line-height:1.3}
@@ -177,6 +178,7 @@ body.gated>*:not(#wizard-screen):not(#toast):not(script){display:none!important}
     <span class="offline-badge">● OFFLINE</span>
     <span id="role-badge" class="role-badge"></span>
     <div class="header-date" id="clock"></div>
+    <button class="hdr-btn" id="owner-changes-btn" style="display:none" onclick="openOwnerChanges()" title="The owner asked for changes to your stock">📥 Owner changes (<span id="owner-changes-n">0</span>)</button>
     <button class="hdr-btn" id="tour-btn" onclick="startTour('page')" title="Guided tour of this page">❓ Tour</button>
     <button class="hdr-btn" onclick="toggleTheme()" id="theme-toggle">🌙</button>
     <button class="hdr-btn" id="header-install-btn" onclick="showInstallModal()" style="display:none;background:var(--accent);color:#000;border-color:var(--accent);">⊕ Install</button>
@@ -455,6 +457,8 @@ body.gated>*:not(#wizard-screen):not(#toast):not(script){display:none!important}
       </div>
       <div class="form-row"><label>Shop key</label><input class="form-input" type="password" id="rm-key" autocomplete="off"></div>
       <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;"><input type="checkbox" id="rm-enabled"> Send updates to the remote dashboard</label>
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer;line-height:1.5;"><input type="checkbox" id="rm-auto" style="margin-top:3px"> <span>Apply the owner's stock changes automatically<br><span style="font-size:11px;color:var(--muted)">Off (recommended): someone here approves each change first. On: restocks, price changes and new products from the owner apply by themselves.</span></span></label>
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer;line-height:1.5;"><input type="checkbox" id="rm-cashier" style="margin-top:3px"> <span>Cashiers can also approve the owner's changes<br><span style="font-size:11px;color:var(--muted)">On: anyone signed in at the till can approve or reject them (cashiers never see cost prices). Off: only the Owner and Managers can.</span></span></label>
       <div id="rm-status" style="font-size:12px;color:var(--muted);line-height:1.5;"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn btn-primary" onclick="saveRemote()">Save</button>
@@ -599,6 +603,15 @@ body.gated>*:not(#wizard-screen):not(#toast):not(script){display:none!important}
 </div>
 
 <!-- MODALS -->
+<!-- Changes the owner asked for -->
+<div class="modal-bg" id="modal-owner-changes">
+  <div class="modal" style="max-width:620px;">
+    <h3>📥 Changes from the owner</h3>
+    <div style="font-size:12px;color:var(--muted);line-height:1.6;">The owner asked for these on the online dashboard. Check each one, then <b>Approve</b> to apply it to this shop's stock, or <b>Reject</b>. The owner sees what you decided.</div>
+    <div id="oc-list" style="display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow-y:auto;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;"><button class="btn btn-secondary" type="button" onclick="closeModal('modal-owner-changes')">Close</button><button class="btn btn-secondary" type="button" onclick="resolveAllOwnerChanges(false)">Reject all</button><button class="btn btn-primary" type="button" onclick="resolveAllOwnerChanges(true)">Approve all</button></div>
+  </div>
+</div>
 <!-- Stock transfer between shops -->
 <div class="modal-bg" id="modal-transfer">
   <div class="modal" style="max-width:600px;">
@@ -959,6 +972,18 @@ function applyRole(role){
     badge.style.display='none';
     lockBtn.style.display='none';
   }
+  applyRoleUI();paintOwnerBadge();
+  const act=document.querySelector('.view.active'),cur=act?act.id.replace('view-',''):'dashboard';
+  if(!canOpenTab(cur))switchTab('dashboard'); // e.g. the Owner left Settings open, then a Cashier signs in
+}
+// Buttons that jump to a page this role cannot open ("View All", the Credit card ...) are hidden or switched off.
+function applyRoleUI(){
+  document.querySelectorAll('[onclick*="switchTab("]').forEach(el=>{
+    if(el.classList.contains('tab'))return;
+    const m=/switchTab\('([a-z]+)'\)/.exec(el.getAttribute('onclick')||'');if(!m)return;
+    const ok=canOpenTab(m[1]);
+    if(el.classList.contains('stat-card'))el.classList.toggle('role-locked',!ok);else el.classList.toggle('role-hidden',!ok);
+  });
 }
 
 function lockApp(){showPINScreen();}
@@ -968,6 +993,8 @@ function endSession(){if(authToken){authAPI('logout',{token:authToken});authToke
 let pinEntry='',pinTargetRole=null;
 function showPINScreen(){
   endSession();
+  document.querySelectorAll('.modal-bg.open').forEach(m=>m.classList.remove('open')); // nothing from the last person stays on screen (receipts, reports, recovery code ...)
+  endTour();const offer=document.getElementById('tour-offer');if(offer)offer.classList.remove('on');trClosePop();
   hideRecoverPanel();
   document.getElementById('pin-shop-label').textContent=settings.shopName||'VoltPOS';
   document.getElementById('pin-screen').style.display='flex';
@@ -1229,7 +1256,9 @@ async function wizardDone(){
 // ═══════════════════════════════════════
 // TABS
 // ═══════════════════════════════════════
+function canOpenTab(tab){return !currentRole||ROLES[currentRole].tabs.includes(tab);}
 function switchTab(tab){
+  if(!canOpenTab(tab)){toast('Your role cannot open that page.');return false;}
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   const t=document.querySelector('[data-tab="'+tab+'"]');
@@ -1310,7 +1339,7 @@ const TOUR={
     {sel:'#s-shopname',up:2,title:'Shop details',text:'Your shop name, address line, currency, VAT % and the footer message. These print on every receipt.'},
     {sel:'#pin-settings-rows',up:1,title:'PIN lock & roles',text:'<b>Cashier</b>: till only. <b>Manager</b>: + inventory, customers, sales, credits. <b>Owner</b>: everything. Set the Owner PIN first. If it\'s ever forgotten, use <b>Forgot Owner PIN?</b> on the lock screen with your recovery code.'},
     {sel:'#view-settings [onclick="regenerateRecovery()"]',title:'Recovery code',text:'Lost your recovery code? Make a new one here (the old one stops working). Keep it somewhere private. It\'s your only way back in if you forget the Owner PIN.'},
-    {sel:'#sec-remote',title:'Remote dashboard',text:'Optional. Connect this shop to the owner\'s online page so sales, profit and stock can be checked from a phone. The shop still works fully offline and sends updates whenever it is online.'},
+    {sel:'#sec-remote',title:'Remote dashboard',text:'Optional. Connect this shop to the owner\'s online page so sales, profit and stock can be checked from a phone. The shop still works fully offline and sends updates whenever it is online. When the owner asks for a restock or price change from his page, it appears at the top as <b>📥 Owner changes</b> for you to approve.'},
     {sel:'#restore-file',up:2,title:'Backup & restore',text:'<b>Backup</b> saves all your data to one file. Do it regularly and keep a copy off this computer (a flash drive or email). <b>Restore</b> loads a backup. <b>Clear All Data</b> erases everything. Be careful.'},
   ],
 };
@@ -1616,6 +1645,8 @@ function buildRemoteSnapshot(){
   return{
     v:1,shopName:settings.shopName||'',currency:settings.currency||'GH₵',generatedAt:new Date().toISOString(),productCount:products.length,
     today:Object.assign({date:today},agg(today,today)),d7:agg(from7,today),d30:agg(from30,today),
+    inventoryTotal:products.length,
+    inventory:[...products].sort((a,b)=>a.name.localeCompare(b.name)).slice(0,2000).map(p=>({id:p.id,name:String(p.name).slice(0,80),cat:String(p.cat||'').slice(0,40),price:r2(p.price),cost:r2(p.cost),stock:p.stock,low:p.low,barcode:String(p.barcode||'').slice(0,40)})),
     outstandingCredit:r2(unpaid.reduce((a,x)=>a+x.total,0)),
     creditCustomers:Object.values(owed).map(o=>({name:o.name,amount:r2(o.amount),count:o.count})).sort((a,b)=>b.amount-a.amount).slice(0,12),
     days,
@@ -1645,7 +1676,9 @@ function startRemoteSync(){
   if(rmStarted)return;rmStarted=true;
   setTimeout(()=>pushRemote(false),5000);                 // shortly after the app opens
   setInterval(()=>pushRemote(false),20*60*1000);          // heartbeat every 20 minutes (also retries after being offline)
-  window.addEventListener('online',()=>scheduleRemotePush());
+  setTimeout(pullOwnerChanges,8000);                      // look for changes the owner asked for
+  setInterval(pullOwnerChanges,2*60*1000);
+  window.addEventListener('online',()=>{scheduleRemotePush();setTimeout(pullOwnerChanges,3000);});
 }
 async function refreshRemoteStatus(){
   const el=document.getElementById('rm-status');if(!el)return;
@@ -1665,13 +1698,19 @@ function loadRemoteUI(){
   document.getElementById('rm-key').value='';
   document.getElementById('rm-key').placeholder=c.configured?'Saved. Leave blank to keep it':'Shop key';
   document.getElementById('rm-enabled').checked=!!c.enabled;
+  document.getElementById('rm-auto').checked=!!settings.remoteAutoApply;
+  document.getElementById('rm-cashier').checked=settings.remoteApprovers!=='managers';
   refreshRemoteStatus();
 }
 async function saveRemote(){
   const r=await remoteAPI('/api/remote/config',{token:authToken,enabled:document.getElementById('rm-enabled').checked,
     url:document.getElementById('rm-url').value,account:document.getElementById('rm-account').value,shop:document.getElementById('rm-shop').value,key:document.getElementById('rm-key').value});
   if(!r.ok){toast(r.error||'Could not save.');return;}
-  applyAuth(r.auth);loadRemoteUI();
+  applyAuth(r.auth);
+  settings.remoteAutoApply=document.getElementById('rm-auto').checked;
+  settings.remoteApprovers=document.getElementById('rm-cashier').checked?'all':'managers';
+  await save(KEY.settings,settings);paintOwnerBadge();
+  loadRemoteUI();
   if(r.auth.remote.enabled){
     const p=await pushRemote(true);
     toast(p.ok?'Saved and sent. Check the dashboard page.':(p.error||'Saved, but could not send yet.'));
@@ -1895,6 +1934,97 @@ function renderTransferHistory(){
 }
 
 // ═══════════════════════════════════════
+// CHANGES FROM THE OWNER (Remote Dashboard). The owner asks for a restock / price / low-stock / new product on the
+// online page. They wait on the server; this shop collects them, and someone here approves (or they apply automatically).
+// ═══════════════════════════════════════
+let ownerPending=[],ownerPulling=false;
+function findForChange(c){return products.find(p=>p.id===c.product)||products.find(p=>c.name&&p.name.toLowerCase()===String(c.name).toLowerCase());}
+function describeOwnerChange(c){
+  const showCost=canOpenTab('inventory'); // a cashier approves the change but never sees cost prices
+  const p=c.type==='add'?null:findForChange(c),nm=c.type==='add'?c.name:(p?p.name:(c.name||'?')+' (not found here)');
+  if(c.type==='restock')return 'Restock +'+c.qty+' × '+nm+(p?'  (stock '+p.stock+' → '+(p.stock+Number(c.qty))+')':'')+(c.cost!=null&&showCost?' · new cost '+c.cost:'');
+  if(c.type==='price')return 'Change the price of '+nm+(p?' from '+p.price+' to '+c.price:' to '+c.price);
+  if(c.type==='low')return 'Set the low-stock level of '+nm+' to '+c.low+(p?'  (now '+p.low+')':'');
+  if(c.type==='add')return 'Add a new product: '+c.name+' · '+(c.cat||'General')+' · price '+c.price+(c.cost&&showCost?' · cost '+c.cost:'')+' · opening stock '+(c.stock||0);
+  return 'Unknown change';
+}
+function applyOwnerChange(c){ // changes the data in memory and says what happened; the caller saves
+  const now=new Date().toISOString(),by='owner (remote)';
+  if(c.type==='add'){
+    const nm=trClean(c.name,80);if(!nm)return{status:'failed',note:'no product name'};
+    if(products.some(p=>p.name.toLowerCase()===nm.toLowerCase()))return{status:'failed',note:'a product with this name already exists'};
+    const st=Number.isInteger(c.stock)&&c.stock>0?c.stock:0;
+    const p={id:uid(),name:nm,cat:trClean(c.cat,40)||'General',price:Number(c.price)||0,cost:Number(c.cost)||0,stock:st,low:Number.isInteger(c.low)?c.low:5,barcode:trClean(c.barcode,40)};
+    products.push(p);
+    stocklog.unshift({date:now,productId:p.id,productName:p.name,type:'initial',change:st,stock:st,ref:by,by,remoteId:c.id,approver:currentRole||'owner'});
+    return{status:'applied',note:'product added'};
+  }
+  const p=findForChange(c);if(!p)return{status:'failed',note:'product not found at this shop'};
+  if(c.type==='restock'){
+    const q=Number(c.qty);if(!Number.isInteger(q)||q<1)return{status:'failed',note:'bad quantity'};
+    p.stock+=q;if(c.cost!=null&&Number(c.cost)>0)p.cost=Number(c.cost);
+    stocklog.unshift({date:now,productId:p.id,productName:p.name,type:'restock',change:q,stock:p.stock,ref:by,by,remoteId:c.id,approver:currentRole||'owner'});
+    return{status:'applied',note:'stock is now '+p.stock};
+  }
+  if(c.type==='price'){const v=Number(c.price);if(!isFinite(v)||v<0)return{status:'failed',note:'bad price'};p.price=v;return{status:'applied',note:'price is now '+v};}
+  if(c.type==='low'){const v=Number(c.low);if(!Number.isInteger(v)||v<0)return{status:'failed',note:'bad level'};p.low=v;return{status:'applied',note:'low-stock level is now '+v};}
+  return{status:'failed',note:'unknown kind of change'};
+}
+async function resolveOwnerChanges(items){ // items: [{c, approve}]
+  const results=[],done=Array.isArray(settings.remoteApplied)?settings.remoteApplied.slice():[];let touched=false;
+  for(const {c,approve} of items){
+    if(!approve){results.push({id:c.id,status:'rejected',note:'rejected at the shop'});continue;}
+    const r=applyOwnerChange(c);results.push({id:c.id,status:r.status,note:r.note});
+    if(r.status==='applied'){done.push(c.id);touched=true;}
+  }
+  if(touched){
+    settings.remoteApplied=done.slice(-300); // remembered so a change is never applied twice, even if the report back is lost
+    await save(KEY.products,products);await save(KEY.stocklog,stocklog);await save(KEY.settings,settings);
+    renderInventory();renderProductGrid();buildCatFilter();renderDashboard();scheduleRemotePush();
+  }
+  const gone=new Set(items.map(i=>i.c.id));ownerPending=ownerPending.filter(c=>!gone.has(c.id));
+  paintOwnerBadge();
+  await remoteAPI('/api/remote/ack',{results}); // if this fails, applied changes are re-reported later without being applied again
+  return results;
+}
+async function pullOwnerChanges(){
+  if(!remoteOn()||ownerPulling)return;
+  ownerPulling=true;
+  try{
+    const r=await remoteAPI('/api/remote/pull',{});
+    if(!r.ok||!Array.isArray(r.changes))return;
+    const seen=new Set(Array.isArray(settings.remoteApplied)?settings.remoteApplied:[]),again=[],fresh=[];
+    r.changes.forEach(c=>{if(seen.has(c.id))again.push({id:c.id,status:'applied',note:'already applied'});else fresh.push(c);});
+    if(again.length)await remoteAPI('/api/remote/ack',{results:again});
+    ownerPending=fresh;
+    if(fresh.length&&settings.remoteAutoApply){const out=await resolveOwnerChanges(fresh.map(c=>({c,approve:true})));toast('Applied '+out.filter(o=>o.status==='applied').length+' change(s) from the owner.');}
+    else paintOwnerBadge();
+  }finally{ownerPulling=false;}
+}
+function canSeeOwnerChanges(){return settings.remoteApprovers==='managers'?canOpenTab('inventory'):true;}
+function paintOwnerBadge(){
+  const b=document.getElementById('owner-changes-btn');if(!b)return;
+  const show=ownerPending.length>0&&canSeeOwnerChanges(); // by default everyone at the till can approve; the shop can restrict it to Owner and Manager
+  b.style.display=show?'':'none';
+  document.getElementById('owner-changes-n').textContent=ownerPending.length;
+  if(!show&&document.getElementById('modal-owner-changes').classList.contains('open'))document.getElementById('modal-owner-changes').classList.remove('open');
+  else if(show&&document.getElementById('modal-owner-changes').classList.contains('open'))renderOwnerChanges();
+}
+function openOwnerChanges(){if(!ownerPending.length)return;renderOwnerChanges();document.getElementById('modal-owner-changes').classList.add('open');}
+function renderOwnerChanges(){
+  const box=document.getElementById('oc-list');box.innerHTML='';
+  ownerPending.forEach(c=>{
+    const row=document.createElement('div');row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;';
+    const t=document.createElement('div');t.style.cssText='font-size:13px;line-height:1.5;';t.textContent=describeOwnerChange(c);
+    const btns=document.createElement('div');btns.style.cssText='display:flex;gap:6px;flex-shrink:0;';
+    const ok=document.createElement('button');ok.className='btn btn-primary';ok.type='button';ok.textContent='Approve';ok.onclick=()=>resolveOwnerChanges([{c,approve:true}]);
+    const no=document.createElement('button');no.className='btn btn-secondary';no.type='button';no.textContent='Reject';no.onclick=()=>resolveOwnerChanges([{c,approve:false}]);
+    btns.append(ok,no);row.append(t,btns);box.appendChild(row);
+  });
+}
+function resolveAllOwnerChanges(approve){resolveOwnerChanges(ownerPending.map(c=>({c,approve})));}
+
+// ═══════════════════════════════════════
 // KEYBOARD SHORTCUTS
 // ═══════════════════════════════════════
 document.addEventListener('keydown',e=>{
@@ -1962,8 +2092,8 @@ function renderProductGrid(){
   if(!products.length&&!document.getElementById('product-search').value&&activeCategory==='All'){
     grid.innerHTML=`<div style="grid-column:1/-1;text-align:center;padding:40px 20px;display:flex;flex-direction:column;align-items:center;gap:14px;">
       <div style="font-size:13px;font-weight:600;">No products yet</div>
-      <div style="font-size:13px;color:var(--muted);max-width:280px;line-height:1.6;">Go to <strong style="color:var(--text)">Inventory</strong> to add your first product.</div>
-      <button class="btn btn-primary" onclick="switchTab('inventory');openAddProduct();">+ Add First Product</button>
+      ${canOpenTab('inventory')?`<div style="font-size:13px;color:var(--muted);max-width:280px;line-height:1.6;">Go to <strong style="color:var(--text)">Inventory</strong> to add your first product.</div>
+      <button class="btn btn-primary" onclick="switchTab('inventory');openAddProduct();">+ Add First Product</button>`:`<div style="font-size:13px;color:var(--muted);max-width:280px;line-height:1.6;">Ask the Manager or Owner to add the products.</div>`}
     </div>`;return;
   }
   if(!list.length){grid.innerHTML=`<div class="no-results">No products found.</div>`;return;}
